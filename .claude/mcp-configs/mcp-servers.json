@@ -1,0 +1,42 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_PAT_HERE"
+      },
+      "description": "GitHub 操作 — PR、Issues、仓库管理"
+    },
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"],
+      "description": "实时文档查询 — Next.js/React/Express 等库文档"
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp", "--browser", "chrome"],
+      "description": "浏览器自动化与 E2E 测试"
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "description": "链式推理 — 复杂问题逐步分析"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "D:\\Test\\Ai\\多语言管理-1"],
+      "description": "文件系统操作（已配置为本项目路径）"
+    },
+    "nexus": {
+      "command": "nexus",
+      "args": ["mcp"],
+      "description": "本地成本/隐私代理 — 查询使用量、路由到最便宜模型"
+    }
+  },
+  "_comments": {
+    "usage": "将需要的服务复制到 ~/.claude.json 的 mcpServers 中以启用",
+    "context_warning": "建议保持启用不超过 6 个 MCP 以节省上下文窗口",
+    "project": "多语言管理平台 — Next.js 16 + Express 4 + TypeScript"
+  }
+}

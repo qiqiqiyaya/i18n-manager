@@ -1,0 +1,37 @@
+# Codemap Update Report — 2026-07-26
+
+## Summary
+Updated existing codemaps for i18n Manager. Diff < 30% — updated in place.
+
+## Codemaps Updated
+- docs/CODEMAPS/architecture.md — Metadata refresh (date, file count)
+- docs/CODEMAPS/backend.md — Metadata refresh (date, file count)
+- docs/CODEMAPS/frontend.md — Expanded utility functions list + metadata refresh
+- docs/CODEMAPS/data.md — Added schema empty translation generation note + metadata refresh
+- docs/CODEMAPS/dependencies.md — Metadata refresh (date, file count)
+
+## Changes Since Last Scan (2026-07-16)
+
+### File Count Correction
+- Previously reported: 15 files scanned
+- Actual: 45 source files in src/ directory
+- Corrected in all codemaps
+
+### Newly Documented Functions (src/lib/utils.ts)
+The following utility functions existed in the code but were not previously documented in codemaps:
+- `keyExists(flattened, key)` — key existence check in flat objects
+- `getLeafPaths(obj, prefix)` — collect all leaf paths recursively
+- `createNestedFromPaths(paths)` — rebuild nested object from leaf paths
+- `findMissingPaths(oldObj, newObj, prefix)` — recursive diff for missing paths
+- `emptyTranslationsFromSchema(schema)` — generate empty translations matching schema
+
+### No Architectural Changes
+- No new API routes, components, stores, or dependencies added
+- No changes to data model, file structure, or key architectural decisions
+- Package.json unchanged (same dependencies and versions)
+- Server.ts unchanged (same Express + Socket.IO setup)
+
+## Architecture Status
+- All codemaps remain accurate representations of the current codebase
+- Core architecture (no DB, no auth, Monaco editor, Socket.IO collaboration) is stable
+- No staleness warnings — all codemaps refreshed within 10 days

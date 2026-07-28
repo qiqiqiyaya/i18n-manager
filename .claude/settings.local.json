@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node *)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "next-devtools"
+  ],
+  "enableAllProjectMcpServers": true
+}
