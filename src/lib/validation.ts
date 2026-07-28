@@ -42,16 +42,15 @@ export const langSchema = z
   .max(20, '语言标识不能超过 20 个字符');
 
 /**
- * Schema 对象校验：必须为 Record<string, string>，不能包含嵌套对象
+ * Schema 对象校验：必须为 JSON 对象（非数组），支持嵌套结构
  */
-export const schemaObjectSchema: z.ZodType<Record<string, string>> = z
-  .record(z.string(), z.string())
+export const schemaObjectSchema: z.ZodType<Record<string, any>> = z
+  .record(z.string(), z.any())
   .refine(
     (obj) => {
-      // 确保所有值都是字符串（不包含嵌套对象）
-      return Object.values(obj).every((v) => typeof v === 'string');
+      return obj !== null && typeof obj === 'object' && !Array.isArray(obj);
     },
-    { message: 'Schema 值必须为字符串，不支持嵌套结构' }
+    { message: 'Schema 必须是 JSON 对象（非数组）' }
   );
 
 /**

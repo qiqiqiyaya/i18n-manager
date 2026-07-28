@@ -3,7 +3,7 @@ import path from 'path';
 import { TranslationObject } from '@/types/schema';
 import { ErrorCode } from '@/types/api';
 import { CustomError } from '../api-wrapper';
-import { createNestedFromPaths, flattenObject, unflattenObject } from '../utils';
+import { createNestedFromPaths, flattenObject, unflattenObject, emptyTranslationsFromSchema } from '../utils';
 import { getProjectDir, atomicWriteJson, readJson } from './io';
 import { updateProject, getProjectById, isProjectExists } from './projects';
 import { getSchema } from './schema';
@@ -34,10 +34,9 @@ export async function addLocale(
     throw new CustomError(ErrorCode.CONFLICT, `语言 "${lang}" 已存在`, 409);
   }
 
-  // 从当前 schema 的扁平键生成嵌套空译文
+  // 从 schema 结构生成嵌套空译文（保持嵌套结构）
   const schema = await getSchema(projectId);
-  const schemaKeys = Object.keys(flattenObject(schema));
-  const emptyTranslations = createNestedFromPaths(schemaKeys);
+  const emptyTranslations = emptyTranslationsFromSchema(schema);
 
   await atomicWriteJson(localePath, emptyTranslations);
 

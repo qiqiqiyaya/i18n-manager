@@ -92,7 +92,13 @@ export function getLeafPaths(
   for (const [key, value] of Object.entries(obj)) {
     const path = prefix ? `${prefix}.${key}` : key;
     if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-      paths.push(...getLeafPaths(value, path));
+      const nested = getLeafPaths(value, path);
+      // 空嵌套对象也视为叶子（与 flattenObject 行为一致）
+      if (nested.length === 0) {
+        paths.push(path);
+      } else {
+        paths.push(...nested);
+      }
     } else {
       paths.push(path);
     }

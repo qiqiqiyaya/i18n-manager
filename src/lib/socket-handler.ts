@@ -140,14 +140,9 @@ export function setupSocketHandlers(io: SocketIOServer): void {
     // Schema 持久化保存（通过 Socket.IO 替代 HTTP PATCH）
     socket.on('schema:save', async (data: SchemaSavePayload) => {
       try {
-        // 从完整 schema 中提取新增键的描述作为 updates
-        const updates: Record<string, any> = {};
-        for (const key of data.addedKeys) {
-          if (key in data.schema) {
-            updates[key] = data.schema[key];
-          }
-        }
-        await updateSchemaIncremental(data.projectId, updates, data.removedKeys);
+        // data.schema 现在是完整的扁平键值对，直接作为 updates
+        // data.addedKeys / data.removedKeys 用于 locale 同步
+        await updateSchemaIncremental(data.projectId, data.schema, data.removedKeys);
         socket.emit('schema:saved', { success: true, projectId: data.projectId });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Schema 保存失败';

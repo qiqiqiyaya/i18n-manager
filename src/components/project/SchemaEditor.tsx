@@ -4,10 +4,10 @@ import { useRef, useCallback, useEffect, useState, useMemo } from 'react';
 import { Subject } from 'rxjs';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import { Button, Space, Tooltip } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled, SyncOutlined } from '@ant-design/icons';
 import { useEditorStore } from '@/stores/editorStore';
 import MonacoEditor, { type MonacoEditorHandle } from '@/components/json-editor/MonacoEditor';
-import { flattenObject } from '@/lib/utils';
+import { flattenObject, getLeafPaths } from '@/lib/utils';
 import type { SchemaUpdatedPayload } from '@/types/collaboration';
 import type { editor } from 'monaco-editor';
 
@@ -53,6 +53,8 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
   const openLocales = useEditorStore((s) => s.openLocales);
   const updateSchema = useEditorStore((s) => s.updateSchema);
   const applyLocaleSync = useEditorStore((s) => s.applyLocaleSync);
+  const saveStatus = useEditorStore((s) => s.saveStatus);
+  const saveError = useEditorStore((s) => s.saveError);
 
   // Monaco 编辑器实例引用（用于添加标记）
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null);
@@ -63,7 +65,7 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
   const [validationStatus, setValidationStatus] = useState<'valid' | 'invalid' | 'parsing'>('valid');
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
 
-  // 上次成功同步到 store 的 schema 快照（用于避免重复同步）
+  // 上次成功同步到 store 的 schema JSON hash（用于避免重复同步）
   const lastSyncedRef = useRef(JSON.stringify(schema));
   // RxJS Subject 用于防抖解析（替代手动 setTimeout/clearTimeout）
   const parseSubjectRef = useRef<Subject<string> | null>(null);
@@ -78,11 +80,26 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
   const openLocalesRef = useRef(openLocales);
   openLocalesRef.current = openLocales;
 
-  // ---------- 接收外部 store 更新（如 WebSocket 广播后的数据重载） ----------
-  // 只有当编辑器未被用户主动编辑时才更新
-  useEffect(() => {
-    if (isEditingRef.current) return;
+  // Schema 变更警告（用户编辑中时外部更新了数据）
+  const [schemaChangeWarning, setSchemaChangeWarning] = useState(false);
 
+  // 标记 store 变更是否由本用户的操作触发（阻止回写覆盖编辑器）
+  const isSelfOriginatedChangeRef = useRef(false);
+
+  // ---------- 接收外部 store 更新（如 WebSocket 广播后的数据重载） ----------
+  useEffect(() => {
+    // 自身操作触发的 store 变更，跳过（编辑器已保持用户输入的文本）
+    if (isSelfOriginatedChangeRef.current) return;
+
+    if (isEditingRef.current) {
+      // 外部更新到达但用户正在编辑，显示警告
+      setSchemaChangeWarning(true);
+      return;
+    }
+
+    setSchemaChangeWarning(false);
+
+    // Schema 现在是嵌套结构，直接显示
     const formatted = JSON.stringify(schema, null, 2);
     if (formatted !== editorText) {
       // 保存当前光标和滚动位置
@@ -141,50 +158,43 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
   }, []);
 
   // ---------- RxJS 防抖解析 JSON 并同步到 store ----------
-  // 使用 Subject + debounceTime + distinctUntilChanged 替代手动 setTimeout/clearTimeout
-  // 注意：通过 ref 访问 schema/openLocales，避免闭包因 store 变化而重建
+  // 用户输入保持原始 JSON 结构（嵌套），直接存入 store
   const parseLogic = useMemo(() => {
     return (rawText: string) => {
-      // 先设置为 parsing 状态（工具条小点变黄）
       setValidationStatus('parsing');
       setValidationMessage(null);
 
       try {
         const parsed = JSON.parse(rawText);
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          const flat = flattenObject(parsed);
-          const clean: Record<string, string> = {};
-          for (const [key, val] of Object.entries(flat)) {
-            const strVal = typeof val === 'string' ? val : String(val);
-            if (key.trim() !== '') {
-              clean[key] = strVal;
-            }
-          }
-
-          const cleanHash = JSON.stringify(clean);
-          // 去重：内容无变化则不重复同步（distinctUntilChanged 是引用比较，这里用 hash）
-          if (cleanHash === lastSyncedRef.current) {
+          const parsedHash = JSON.stringify(parsed);
+          // 去重：内容无变化则不重复同步
+          if (parsedHash === lastSyncedRef.current) {
             setValidationStatus('valid');
             setValidationMessage(null);
             setMonacoMarkers(null);
             return;
           }
 
-          // 通过 ref 读取最新 schema/openLocales，不依赖闭包
+          // 通过 ref 读取最新 schema，不依赖闭包
           const currentSchema = schemaRef.current;
-          const currentOpenLocales = openLocalesRef.current;
 
-          // 计算完整的 diff：新增键、删除键、重命名检测
-          const oldKeys = Object.keys(currentSchema);
-          const newKeys = Object.keys(clean).filter((key) => !(key in currentSchema));
-          const removedKeys = oldKeys.filter((key) => !(key in clean));
+          // 扁平化计算 diff：新增键、删除键、重命名检测
+          const oldFlatKeys = Object.keys(flattenObject(currentSchema));
+          const newFlatKeys = getLeafPaths(parsed);
+          const newKeys = newFlatKeys.filter((key) => !oldFlatKeys.includes(key));
+          const removedKeys = oldFlatKeys.filter((key) => !newFlatKeys.includes(key));
           const renameMap = detectRenames(removedKeys, newKeys);
 
           // 从 removedKeys 中移除已被 renameMap 覆盖的键
           const effectiveRemovedKeys = removedKeys.filter((key) => !(key in renameMap));
 
-          updateSchema(clean);
-          lastSyncedRef.current = cleanHash;
+          // 标记为自身操作触发，阻止 useEffect 回写
+          isSelfOriginatedChangeRef.current = true;
+          setTimeout(() => { isSelfOriginatedChangeRef.current = false; }, 0);
+
+          updateSchema(parsed);
+          lastSyncedRef.current = parsedHash;
           setValidationStatus('valid');
           setValidationMessage(null);
           setMonacoMarkers(null);
@@ -197,7 +207,7 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
           // 广播 Schema 变更给其他客户端（时间戳 + 来源标识）
           if (sendSchemaUpdated && (newKeys.length > 0 || effectiveRemovedKeys.length > 0)) {
             sendSchemaUpdated({
-              schema: clean,
+              schema: parsed,
               addedKeys: newKeys,
               removedKeys: effectiveRemovedKeys,
               renameMap: Object.keys(renameMap).length > 0 ? renameMap : undefined,
@@ -206,10 +216,16 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
             });
           }
 
-          // 通过 Socket.IO 持久化到磁盘（替代 HTTP PATCH）
-          if (sendSchemaSave && (newKeys.length > 0 || effectiveRemovedKeys.length > 0)) {
+          // 通过 Socket.IO 持久化到磁盘
+          if (sendSchemaSave) {
+            // 构建完整的扁平键值对（所有键，不只是新增键）
+            const flatUpdates: Record<string, string> = {};
+            const flatParsed = flattenObject(parsed);
+            for (const [k, v] of Object.entries(flatParsed)) {
+              flatUpdates[k] = typeof v === 'string' ? v : String(v);
+            }
             sendSchemaSave({
-              schema: clean,
+              schema: flatUpdates,
               addedKeys: newKeys,
               removedKeys: effectiveRemovedKeys,
             });
@@ -259,10 +275,9 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
   );
 
   // ---------- 失去焦点时立即尝试解析 ----------
-  // 注：使用 ref 而非 editorText state，因为 blur handler 在
-  // onEditorMount 中注册（仅一次），闭包会捕获过期的 editorText
   const handleBlur = useCallback(() => {
     isEditingRef.current = false;
+    setSchemaChangeWarning(false);
     const text = editorTextRef.current;
     try {
       const parsed = JSON.parse(text);
@@ -282,15 +297,11 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
       setValidationMessage(msg);
       setMonacoMarkers(msg);
     }
-  }, [setMonacoMarkers]); // 空依赖：editorTextRef.current 始终保持最新
+  }, [setMonacoMarkers]);
 
   // ---------- Monaco 编辑器挂载时注册 blur 监听 + 保存 monaco 实例 ----------
-  // 稳定引用：onEditorMount 只依赖 handleBlur（空依赖），永远不变
-  // 目的：配合 MonacoEditor 的 React.memo 防止不必要的重渲染级联
   const handleEditorMount = useCallback((editor: any) => {
-    // 保存 Monaco 实例引用，用于添加标记
     try {
-      // Monaco Editor 实例上可以获取到 monaco 命名空间
       const editorInstance = editor as editor.IStandaloneCodeEditor;
       editorInstanceRef.current = editorInstance;
       // @ts-ignore — monaco 实例通过全局访问
@@ -306,30 +317,51 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
   // ---------- 快速添加键（辅助功能） ----------
   const handleAddKey = useCallback(() => {
     const baseKey = 'new_key';
+    // 检查扁平化 schema 中是否已存在该键
+    const flatSchema = flattenObject(schema);
     let key = baseKey;
     let counter = 1;
-    while (key in schema) {
+    while (key in flatSchema) {
       key = `${baseKey}_${counter}`;
       counter++;
     }
 
-    const newSchema = { ...schema, [key]: '' };
-    const formatted = JSON.stringify(newSchema, null, 2);
+    // 从编辑器当前 JSON 文本解析嵌套结构，添加新键到根级别
+    let currentNested: Record<string, any>;
+    try {
+      currentNested = JSON.parse(editorTextRef.current);
+    } catch {
+      currentNested = {};
+    }
+    if (!currentNested || typeof currentNested !== 'object' || Array.isArray(currentNested)) {
+      currentNested = {};
+    }
+    currentNested[key] = '';
+
+    const formatted = JSON.stringify(currentNested, null, 2);
     setEditorText(formatted);
-    lastSyncedRef.current = JSON.stringify(newSchema);
+    lastSyncedRef.current = formatted;
     setValidationStatus('valid');
     setValidationMessage(null);
     editorRef.current?.setValue(formatted);
-    updateSchema(newSchema);
 
-    // 使用 applyLocaleSync 统一同步 locale
-    applyLocaleSync([key], []);
+    // 标记为自身操作，阻止 useEffect 回写
+    isSelfOriginatedChangeRef.current = true;
+    setTimeout(() => { isSelfOriginatedChangeRef.current = false; }, 0);
+
+    updateSchema(currentNested);
+
+    // 扁平化键路径用于 locale 同步
+    const newFlatKeys = getLeafPaths(currentNested);
+    const newKeys = newFlatKeys.filter((k) => !(k in flatSchema));
+
+    applyLocaleSync(newKeys, []);
 
     // 广播 Schema 变更
     if (sendSchemaUpdated) {
       sendSchemaUpdated({
-        schema: newSchema,
-        addedKeys: [key],
+        schema: currentNested,
+        addedKeys: newKeys,
         removedKeys: [],
         timestamp: Date.now(),
         clientId: socketId || '',
@@ -338,13 +370,19 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
 
     // 通过 Socket.IO 持久化到磁盘
     if (sendSchemaSave) {
+      // 构建完整的扁平键值对
+      const flatUpdates: Record<string, string> = {};
+      const flatParsed = flattenObject(currentNested);
+      for (const [k, v] of Object.entries(flatParsed)) {
+        flatUpdates[k] = typeof v === 'string' ? v : String(v);
+      }
       sendSchemaSave({
-        schema: newSchema,
-        addedKeys: [key],
+        schema: flatUpdates,
+        addedKeys: newKeys,
         removedKeys: [],
       });
     }
-  }, [schema, openLocales, updateSchema, applyLocaleSync, sendSchemaUpdated, sendSchemaSave, socketId]);
+  }, [schema, updateSchema, applyLocaleSync, sendSchemaUpdated, sendSchemaSave, socketId]);
 
   // ---------- 格式化文档 ----------
   const handleFormat = useCallback(() => {
@@ -388,27 +426,51 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
           </Button>
         </Space>
 
-        {/* JSON 校验状态指示器（紧凑圆点 + 工具提示） */}
-        <Tooltip title={validationMessage || (validationStatus === 'valid' ? 'JSON 有效' : '校验中...')}>
+        {/* 保存状态 + JSON 校验指示器（右上角工具栏） */}
+        <Tooltip title={
+          validationMessage
+            || (saveStatus === 'error' ? saveError : null)
+            || (saveStatus === 'idle' ? '已保存' : null)
+        }>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'default' }}>
-            <span style={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              display: 'inline-block',
-              background: validationStatus === 'valid' ? '#4ec9b0'
-                         : validationStatus === 'parsing' ? '#d4b106'
-                         : '#f44747',
-              transition: 'background 0.3s',
-            }} />
-            <span style={{ fontSize: 11, color: '#888' }}>
-              {validationStatus === 'valid' ? '有效'
-               : validationStatus === 'parsing' ? '校验中'
-               : '错误'}
-            </span>
+            {validationStatus === 'invalid' ? (
+              <>
+                <CloseCircleFilled style={{ color: '#f44747', fontSize: 12 }} />
+                <span style={{ fontSize: 11, color: '#f44747' }}>{validationMessage || 'JSON 错误'}</span>
+              </>
+            ) : saveStatus === 'saving' ? (
+              <>
+                <SyncOutlined spin style={{ color: '#1890ff', fontSize: 12 }} />
+                <span style={{ fontSize: 11, color: '#1890ff' }}>保存中...</span>
+              </>
+            ) : saveStatus === 'error' ? (
+              <>
+                <CloseCircleFilled style={{ color: '#f44747', fontSize: 12 }} />
+                <span style={{ fontSize: 11, color: '#f44747' }}>保存失败</span>
+              </>
+            ) : saveStatus === 'dirty' ? (
+              <>
+                <ExclamationCircleFilled style={{ color: '#d4b106', fontSize: 12 }} />
+                <span style={{ fontSize: 11, color: '#d4b106' }}>未保存</span>
+              </>
+            ) : (
+              <>
+                <CheckCircleFilled style={{ color: '#4ec9b0', fontSize: 12 }} />
+                <span style={{ fontSize: 11, color: '#4ec9b0' }}>
+                  {validationStatus === 'parsing' ? '校验中' : '已保存'}
+                </span>
+              </>
+            )}
           </div>
         </Tooltip>
       </div>
+
+      {/* Schema 变更警告（用户编辑中时外部 Schema 更新） */}
+      {schemaChangeWarning && (
+        <div style={{ padding: '4px 8px', background: '#fffbe6', borderBottom: '1px solid #ffe58f', fontSize: 12, color: '#d48806', flexShrink: 0 }}>
+          <span role="img" aria-label="warning">⚠️</span> Schema 已被他人更新，完成编辑后即可刷新
+        </div>
+      )}
 
       {/* Monaco 编辑器 */}
       <div style={{ flex: 1, minHeight: 0 }}>

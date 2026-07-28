@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
+import { Subject, timer } from 'rxjs';
+import { filter, switchMap, takeUntil, tap } from 'rxjs/operators';
 import { io, Socket } from 'socket.io-client';
 import { useCollaborationStore } from '@/stores/collaborationStore';
 import { useEditorStore } from '@/stores/editorStore';
@@ -23,6 +25,48 @@ export function useSocket({ projectId }: UseSocketOptions) {
   const setSchema = useEditorStore((s) => s.setSchema);
   const updateTranslation = useEditorStore((s) => s.updateTranslation);
   const applyLocaleSync = useEditorStore((s) => s.applyLocaleSync);
+  const setSaveStatus = useEditorStore((s) => s.setSaveStatus);
+
+  // ---- 保存状态流（RxJS）----
+  // savingStart$: saving 开始时发出时间戳
+  // saveResult$: 收到服务端回执时发出结果
+  // 用 timer 确保 saving 至少显示 800ms，避免一闪而过
+  const SAVING_MIN_DISPLAY = 800;
+  const SAVED_AUTO_CLEAR = 2000;
+
+  const { savingStart$, saveResult$ } = useMemo(() => {
+    const savingStart$ = new Subject<number>();
+    const saveResult$ = new Subject<{ success: boolean; error?: string }>();
+
+    // 收到回执后，如果距 saving 开始不足 800ms，延迟到满 800ms 再处理
+    saveResult$
+      .pipe(
+        switchMap((result) => {
+          const elapsed = Date.now() - lastSavingStart;
+          const delay = Math.max(0, SAVING_MIN_DISPLAY - elapsed);
+          return timer(delay).pipe(
+            tap(() => {
+              if (result.success) {
+                setSaveStatus('saved');
+                // saved 状态 2s 后自动回到 idle
+                timer(SAVED_AUTO_CLEAR)
+                  .pipe(filter(() => useEditorStore.getState().saveStatus === 'saved'))
+                  .subscribe(() => setSaveStatus('idle'));
+              } else {
+                setSaveStatus('error', result.error || '保存失败');
+              }
+            })
+          );
+        })
+      )
+      .subscribe();
+
+    return { savingStart$, saveResult$ };
+  }, [setSaveStatus]);
+
+  // 记录最近一次 saving 开始时间
+  let lastSavingStart = 0;
+  savingStart$.subscribe((ts) => { lastSavingStart = ts; });
 
   useEffect(() => {
     if (!projectId) return;
@@ -83,6 +127,16 @@ export function useSocket({ projectId }: UseSocketOptions) {
       setTimeout(() => setOverwrittenMessage(null), 5000);
     });
 
+    // Schema 保存回执
+    socket.on('schema:saved', (data: { success: boolean; error?: string }) => {
+      saveResult$.next(data);
+    });
+
+    // Locale 保存回执
+    socket.on('locale:saved', (data: { success: boolean; error?: string }) => {
+      saveResult$.next(data);
+    });
+
     return () => {
       socket.disconnect();
       socketRef.current = null;
@@ -106,10 +160,14 @@ export function useSocket({ projectId }: UseSocketOptions) {
   };
 
   const sendSchemaSave = (data: { schema: Record<string, any>; addedKeys: string[]; removedKeys: string[] }) => {
+    savingStart$.next(Date.now());
+    setSaveStatus('saving');
     socketRef.current?.emit('schema:save', { projectId, ...data });
   };
 
   const sendLocaleSave = (lang: string, translations: Record<string, any>) => {
+    savingStart$.next(Date.now());
+    setSaveStatus('saving');
     socketRef.current?.emit('locale:save', { projectId, lang, translations });
   };
 

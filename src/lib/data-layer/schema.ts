@@ -25,7 +25,7 @@ export async function getSchema(
 }
 
 /**
- * 更新 Schema
+ * 更新 Schema（直接写入嵌套对象）
  */
 export async function updateSchema(
   projectId: string,
@@ -38,7 +38,7 @@ export async function updateSchema(
     throw new CustomError(ErrorCode.NOT_FOUND, '项目不存在', 404);
   }
 
-  // 获取旧 Schema 以计算键差异
+  // 获取旧 Schema 以计算键差异（扁平化后比较）
   const oldSchema = await getSchema(projectId);
   const oldFlatKeys = Object.keys(flattenObject(oldSchema));
   const newFlatKeys = Object.keys(flattenObject(schema));
@@ -46,6 +46,7 @@ export async function updateSchema(
   const addedKeys = newFlatKeys.filter((k) => !oldFlatKeys.includes(k));
   const removedKeys = oldFlatKeys.filter((k) => !newFlatKeys.includes(k));
 
+  // 直接写入嵌套对象
   await atomicWriteJson(schemaPath, schema);
   await updateProject(projectId, {});
 
@@ -97,7 +98,7 @@ export async function updateSchemaIncremental(
 
   // 应用更新
   for (const [key, value] of Object.entries(updates)) {
-    if (value === '' || value === null || value === undefined) {
+    if (value === null || value === undefined) {
       delete flatSchema[key];
     } else {
       flatSchema[key] = String(value);
@@ -109,8 +110,8 @@ export async function updateSchemaIncremental(
     delete flatSchema[key];
   }
 
-  // 写回文件
-  await atomicWriteJson(schemaPath, flatSchema);
+  // 写回文件（还原为嵌套结构）
+  await atomicWriteJson(schemaPath, unflattenObject(flatSchema));
 
   // 更新最后时间戳
   const nowTimestamp = Date.now();

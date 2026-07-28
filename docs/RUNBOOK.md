@@ -9,6 +9,7 @@ i18n Manager 部署与运维手册。命令表与环境变量表由源码生成�
 - HTTP + WebSocket：同一端口（默认 3000）
 - Socket.IO 路径 `/socket.io` 由 HTTP server 自处理，其余请求转交 Next.js
 - 启动时自动 `fs.ensureDirSync({DATA_DIR}/projects)`
+- `fix-async-storage.cjs` 通过 `--require` 在启动前注入 `globalThis.AsyncLocalStorage`（Next.js 16 canary 兼容性修复）
 
 <!-- AUTO-GENERATED:env -->
 ## 环境变量
@@ -29,7 +30,7 @@ i18n Manager 部署与运维手册。命令表与环境变量表由源码生成�
 git pull
 npm ci
 
-# 2. 配置环境变量
+# 2. 配置环境变量（可选，所有变量均有默认值）
 cp .env.example .env.local     # 首次；按环境调整 PORT / DATA_DIR / NEXT_PUBLIC_WS_URL
 
 # 3. 生产构建
@@ -43,6 +44,21 @@ NODE_ENV=production npm run start:server
 
 建议用进程管理器（如 pm2 / systemd）守护 `tsx server.ts`，并将 `NODE_ENV=production` 注入环境。
 
+### PM2 示例配置
+
+```json
+{
+  "name": "i18n-manager",
+  "script": "node",
+  "args": "--require ./fix-async-storage.cjs --import tsx server.ts",
+  "env": {
+    "NODE_ENV": "production",
+    "PORT": "3000",
+    "DATA_DIR": "./data"
+  }
+}
+```
+
 ## 健康检查
 
 - **HTTP**：`GET /` 应返回项目列表页（200）。
@@ -55,11 +71,15 @@ NODE_ENV=production npm run start:server
 | 现象 | 可能原因 | 处理 |
 |------|----------|------|
 | 启动即退出，报端口占用 | `PORT` 被占用 | 更换 `PORT` 或释放端口 |
+| 启动报 `AsyncLocalStorage` 错误 | `fix-async-storage.cjs` 未加载 | 确认启动命令包含 `--require ./fix-async-storage.cjs` |
 | 前端无法实时协作 | 只跑了 `npm run start` / `dev` | 改用 `npm run start:server` |
 | WebSocket 连接失败 | `NEXT_PUBLIC_WS_URL` 与实际地址不符 | 修正后重新构建（该变量为 `NEXT_PUBLIC_`，需在构建时确定） |
-| 保存报锁冲突 / 文件写入失败 | `proper-lockfile` 互斥锁未释放或目录无写权限 | 检查 `{DATA_DIR}` 权限；清理残留 `.lock` 文件 |
+| 保存报锁冲突 / 文件写入失败 | `proper-lockfile` 互斥锁未释放或目录无写权限 | 检查 `{DATA_DIR}` 权限；清理残留 `.tmp` 和 `.lock` 文件 |
 | 键锁长时间不释放 | 客户端异常断连 | 锁在 `LOCK_TIMEOUT`（默认 30s）后自动释放 |
 | 导入返回 409 | 检测到冲突需确认 | 前端确认后带 `confirmed=true` 重新提交 |
+| Schema 保存被拒绝 | 时间戳冲突（另一用户先保存了更新） | 客户端收到 `schema:rejected` 后自动同步到最新版本 |
+| 删除语言返回 409 | 该语言是项目最后一个语言 | 至少保留一个语言，无法删除 |
+| Express 5 路由报错 | 使用了通配符路径 | Express 5 (path-to-regexp v8) 不支持通配符，使用无路径 `use()` 兜底 |
 
 ## 回滚流程
 

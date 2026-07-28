@@ -2,7 +2,9 @@
 
 import { create } from 'zustand';
 import { SchemaObject, TranslationObject } from '@/types/schema';
-import { deepClone, hasNestedPath, setNestedValue, flattenObject, unflattenObject } from '@/lib/utils';
+import { deepClone, hasNestedPath, setNestedValue, flattenObject, unflattenObject, emptyTranslationsFromSchema } from '@/lib/utils';
+
+export type SaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
 
 interface EditorState {
   projectId: string | null;
@@ -11,6 +13,8 @@ interface EditorState {
   activeLang: string | null;
   isDirty: boolean;
   isLoading: boolean;
+  saveStatus: SaveStatus;
+  saveError: string | null;
 
   setProjectId: (id: string) => void;
   setSchema: (schema: SchemaObject) => void;
@@ -24,6 +28,7 @@ interface EditorState {
   reconcileSchemaInLocales: (newSchema: SchemaObject) => void;
   setIsDirty: (dirty: boolean) => void;
   setIsLoading: (loading: boolean) => void;
+  setSaveStatus: (status: SaveStatus, error?: string | null) => void;
   reset: () => void;
 }
 
@@ -34,6 +39,8 @@ const initialState = {
   activeLang: null,
   isDirty: false,
   isLoading: false,
+  saveStatus: 'idle' as SaveStatus,
+  saveError: null as string | null,
 };
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -41,21 +48,30 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   setProjectId: (projectId) => set({ projectId }),
   setSchema: (schema) => set({ schema }),
-  updateSchema: (schema) => set({ schema, isDirty: true }),
+  updateSchema: (schema) => set({ schema, isDirty: true, saveStatus: 'dirty' }),
   setOpenLocales: (locales) => set({ openLocales: locales }),
 
   openLocale: (lang, translations) =>
     set((state) => {
-      // 将 Schema 中所有扁平键同步到嵌套译文（不覆盖已有值）
-      const schemaKeys = Object.keys(state.schema);
+      // 从 schema 生成空译文模板，然后递归合并（不覆盖已有值）
+      const template = emptyTranslationsFromSchema(state.schema);
       const merged = deepClone(translations);
-      if (schemaKeys.length > 0) {
-        for (const key of schemaKeys) {
-          if (!hasNestedPath(merged, key)) {
-            setNestedValue(merged, key, '');
+
+      // 递归合并：只在 translations 中缺失的键上填入空字符串
+      const mergeTemplate = (target: Record<string, any>, source: Record<string, any>) => {
+        for (const [key, value] of Object.entries(source)) {
+          if (!(key in target)) {
+            target[key] = deepClone(value);
+          } else if (
+            value !== null && typeof value === 'object' && !Array.isArray(value) &&
+            target[key] !== null && typeof target[key] === 'object' && !Array.isArray(target[key])
+          ) {
+            mergeTemplate(target[key], value);
           }
         }
-      }
+      };
+
+      mergeTemplate(merged, template);
       return {
         openLocales: { ...state.openLocales, [lang]: merged },
         activeLang: state.activeLang || lang,
@@ -77,6 +93,7 @@ export const useEditorStore = create<EditorState>((set) => ({
     set((state) => ({
       openLocales: { ...state.openLocales, [lang]: translations },
       isDirty: true,
+      saveStatus: 'dirty',
     })),
 
   applyLocaleSync: (addedKeys, removedKeys, renameMap?) =>
@@ -147,5 +164,6 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   setIsDirty: (isDirty) => set({ isDirty }),
   setIsLoading: (isLoading) => set({ isLoading }),
+  setSaveStatus: (saveStatus, saveError = null) => set({ saveStatus, saveError }),
   reset: () => set(initialState),
 }));

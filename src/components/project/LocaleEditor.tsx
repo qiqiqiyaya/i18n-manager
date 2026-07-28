@@ -4,7 +4,7 @@ import { useRef, useCallback, useEffect, useState, useMemo } from 'react';
 import { Subject } from 'rxjs';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import { Alert, Popover, Tag, Typography } from 'antd';
-import { CheckCircleFilled, CloseCircleFilled } from '@ant-design/icons';
+import { CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled, SyncOutlined } from '@ant-design/icons';
 import { useEditorStore } from '@/stores/editorStore';
 import { useCollaborationStore } from '@/stores/collaborationStore';
 import MonacoEditor, { type MonacoEditorHandle } from '@/components/json-editor/MonacoEditor';
@@ -28,6 +28,8 @@ export default function LocaleEditor({ sendLocaleSave }: LocaleEditorProps) {
   const openLocales = useEditorStore((s) => s.openLocales);
   const schema = useEditorStore((s) => s.schema);
   const updateTranslation = useEditorStore((s) => s.updateTranslation);
+  const saveStatus = useEditorStore((s) => s.saveStatus);
+  const saveError = useEditorStore((s) => s.saveError);
 
   // 编辑器本地文本管理
   const [editorText, setEditorText] = useState<string>('');
@@ -333,7 +335,7 @@ export default function LocaleEditor({ sendLocaleSave }: LocaleEditorProps) {
         </Popover>
       </div>
 
-      {/* JSON 状态指示器 */}
+      {/* 保存状态 + JSON 校验指示器（底部状态栏） */}
       <div
         style={{
           display: 'flex',
@@ -347,14 +349,29 @@ export default function LocaleEditor({ sendLocaleSave }: LocaleEditorProps) {
         }}
       >
         {validationError ? (
-          <span style={{ fontSize: 11, color: '#f48771', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 11, color: '#f44747', display: 'flex', alignItems: 'center', gap: 4 }}>
             <CloseCircleFilled style={{ color: '#f44747' }} />
-            JSON 错误
+            {validationError}
+          </span>
+        ) : saveStatus === 'saving' ? (
+          <span style={{ fontSize: 11, color: '#1890ff', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <SyncOutlined spin style={{ color: '#1890ff' }} />
+            保存中...
+          </span>
+        ) : saveStatus === 'error' ? (
+          <span style={{ fontSize: 11, color: '#f44747', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <CloseCircleFilled style={{ color: '#f44747' }} />
+            保存失败{saveError ? `: ${saveError}` : ''}
+          </span>
+        ) : saveStatus === 'dirty' ? (
+          <span style={{ fontSize: 11, color: '#d4b106', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <ExclamationCircleFilled style={{ color: '#d4b106' }} />
+            未保存
           </span>
         ) : (
-          <span style={{ fontSize: 11, color: '#6a9955', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 11, color: '#4ec9b0', display: 'flex', alignItems: 'center', gap: 4 }}>
             <CheckCircleFilled style={{ color: '#4ec9b0' }} />
-            JSON 有效
+            已保存
           </span>
         )}
       </div>
