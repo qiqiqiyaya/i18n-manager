@@ -2,7 +2,7 @@
 
 import { create } from 'zustand';
 import { SchemaObject, TranslationObject } from '@/types/schema';
-import { deepClone, hasNestedPath, setNestedValue, flattenObject, unflattenObject, emptyTranslationsFromSchema } from '@/lib/utils';
+import { deepClone, flattenObject, unflattenObject, emptyTranslationsFromSchema, deepMergeTemplate } from '@/lib/utils';
 
 export type SaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
 
@@ -63,10 +63,16 @@ export const useEditorStore = create<EditorState>((set) => ({
           if (!(key in target)) {
             target[key] = deepClone(value);
           } else if (
-            value !== null && typeof value === 'object' && !Array.isArray(value) &&
-            target[key] !== null && typeof target[key] === 'object' && !Array.isArray(target[key])
+            value !== null && typeof value === 'object' && !Array.isArray(value)
           ) {
-            mergeTemplate(target[key], value);
+            // source 是嵌套对象
+            if (target[key] !== null && typeof target[key] === 'object' && !Array.isArray(target[key])) {
+              // target 也是嵌套对象 → 递归合并
+              mergeTemplate(target[key], value);
+            } else {
+              // target 是基本类型 → 用 source 的嵌套结构覆盖
+              target[key] = deepClone(value);
+            }
           }
         }
       };
@@ -99,6 +105,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   applyLocaleSync: (addedKeys, removedKeys, renameMap?) =>
     set((state) => {
       if (addedKeys.length === 0 && removedKeys.length === 0 && (!renameMap || Object.keys(renameMap).length === 0)) return state;
+      // 在循环前预计算 schema 模板，避免每语言重复计算
+      const schemaTemplate = emptyTranslationsFromSchema(state.schema);
       const newOpenLocales: Record<string, TranslationObject> = {};
       for (const [lang, translations] of Object.entries(state.openLocales)) {
         let flatCurrent: Record<string, any>;
@@ -129,7 +137,8 @@ export const useEditorStore = create<EditorState>((set) => ({
           delete flatCurrent[key];
         }
         try {
-          newOpenLocales[lang] = unflattenObject(flatCurrent);
+          const unflattened = unflattenObject(flatCurrent);
+          newOpenLocales[lang] = deepMergeTemplate(unflattened, schemaTemplate);
         } catch {
           newOpenLocales[lang] = translations;
         }
@@ -154,7 +163,9 @@ export const useEditorStore = create<EditorState>((set) => ({
           result[key] = key in flatCurrent ? flatCurrent[key] : '';
         }
         try {
-          newOpenLocales[lang] = unflattenObject(result);
+          const unflattened = unflattenObject(result);
+          const schemaTemplate = emptyTranslationsFromSchema(newSchema);
+          newOpenLocales[lang] = deepMergeTemplate(unflattened, schemaTemplate);
         } catch {
           newOpenLocales[lang] = translations;
         }

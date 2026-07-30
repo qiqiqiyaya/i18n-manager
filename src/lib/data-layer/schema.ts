@@ -3,7 +3,7 @@ import path from 'path';
 import { SchemaObject } from '@/types/schema';
 import { ErrorCode } from '@/types/api';
 import { CustomError } from '../api-wrapper';
-import { flattenObject, unflattenObject } from '../utils';
+import { flattenObject, unflattenObject, emptyTranslationsFromSchema, deepMergeTemplate } from '../utils';
 import { getIO } from '../socket-handler';
 import { getProjectDir, atomicWriteJson, readJson } from './io';
 import { updateProject, isProjectExists } from './projects';
@@ -100,6 +100,9 @@ export async function updateSchemaIncremental(
   for (const [key, value] of Object.entries(updates)) {
     if (value === null || value === undefined) {
       delete flatSchema[key];
+    } else if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      // 嵌套对象：保留原样，不调用 String()
+      flatSchema[key] = value;
     } else {
       flatSchema[key] = String(value);
     }
@@ -141,6 +144,10 @@ async function syncSchemaChangesToLocales(
   const projectDir = getProjectDir(projectId);
   const localesDir = path.join(projectDir, 'locales');
 
+  // 在循环前读取 schema，避免每语言重复 I/O
+  const schemaData = await getSchema(projectId);
+  const schemaTemplate = emptyTranslationsFromSchema(schemaData);
+
   // 获取所有语言文件
   let localeFiles: string[] = [];
   try {
@@ -155,22 +162,28 @@ async function syncSchemaChangesToLocales(
   for (const lang of localeFiles) {
     const localePath = path.join(localesDir, `${lang}.json`);
     const current = await readJson<Record<string, any>>(localePath, {});
-    const flatCurrent = flattenObject(current);
 
-    // 新增键 → 以空字符串填充
-    for (const key of addedKeys) {
-      if (!(key in flatCurrent)) {
-        flatCurrent[key] = '';
+    if (addedKeys.length > 0 || removedKeys.length > 0) {
+      const flatCurrent = flattenObject(current);
+
+      // 新增键 → 以空字符串填充
+      for (const key of addedKeys) {
+        if (!(key in flatCurrent)) {
+          flatCurrent[key] = '';
+        }
       }
-    }
 
-    // 删除键 → 从译文中移除
-    for (const key of removedKeys) {
-      delete flatCurrent[key];
-    }
+      // 删除键 → 从译文中移除
+      for (const key of removedKeys) {
+        delete flatCurrent[key];
+      }
 
-    // 写回文件（还原为嵌套结构）
-    await atomicWriteJson(localePath, unflattenObject(flatCurrent));
+      // 写回文件（还原为嵌套结构）
+      const unflattened = unflattenObject(flatCurrent);
+      const finalTranslations = deepMergeTemplate(unflattened, schemaTemplate);
+
+      await atomicWriteJson(localePath, finalTranslations);
+    }
   }
 
   // 广播同步事件给该项目的所有在线客户端

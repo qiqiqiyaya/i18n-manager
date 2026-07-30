@@ -218,14 +218,8 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
 
           // 通过 Socket.IO 持久化到磁盘
           if (sendSchemaSave) {
-            // 构建完整的扁平键值对（所有键，不只是新增键）
-            const flatUpdates: Record<string, string> = {};
-            const flatParsed = flattenObject(parsed);
-            for (const [k, v] of Object.entries(flatParsed)) {
-              flatUpdates[k] = typeof v === 'string' ? v : String(v);
-            }
             sendSchemaSave({
-              schema: flatUpdates,
+              schema: parsed,
               addedKeys: newKeys,
               removedKeys: effectiveRemovedKeys,
             });
@@ -370,14 +364,8 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
 
     // 通过 Socket.IO 持久化到磁盘
     if (sendSchemaSave) {
-      // 构建完整的扁平键值对
-      const flatUpdates: Record<string, string> = {};
-      const flatParsed = flattenObject(currentNested);
-      for (const [k, v] of Object.entries(flatParsed)) {
-        flatUpdates[k] = typeof v === 'string' ? v : String(v);
-      }
       sendSchemaSave({
-        schema: flatUpdates,
+        schema: currentNested,
         addedKeys: newKeys,
         removedKeys: [],
       });

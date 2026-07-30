@@ -1,6 +1,6 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import type { LockMessage, UpdatePayload, SchemaUpdatedPayload, SchemaSavePayload, LocaleSavePayload } from '../types/collaboration';
-import { updateSchemaIncremental } from './data-layer/schema';
+import { updateSchema } from './data-layer/schema';
 import { updateLocale } from './data-layer/locales';
 
 const LOCK_TIMEOUT = parseInt(process.env.LOCK_TIMEOUT || '30000', 10);
@@ -140,9 +140,8 @@ export function setupSocketHandlers(io: SocketIOServer): void {
     // Schema 持久化保存（通过 Socket.IO 替代 HTTP PATCH）
     socket.on('schema:save', async (data: SchemaSavePayload) => {
       try {
-        // data.schema 现在是完整的扁平键值对，直接作为 updates
-        // data.addedKeys / data.removedKeys 用于 locale 同步
-        await updateSchemaIncremental(data.projectId, data.schema, data.removedKeys);
+        // 直接写入嵌套 schema 对象
+        await updateSchema(data.projectId, data.schema);
         socket.emit('schema:saved', { success: true, projectId: data.projectId });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Schema 保存失败';

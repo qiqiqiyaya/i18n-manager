@@ -19,7 +19,12 @@ export function flattenObject(
     if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
       // 递归处理嵌套对象
       const nested = flattenObject(value, fullPath);
-      Object.assign(result, nested);
+      // 空嵌套对象也保留为叶子："yiku": {} → "yiku": ""
+      if (Object.keys(nested).length === 0) {
+        result[fullPath] = '';
+      } else {
+        Object.assign(result, nested);
+      }
     } else if (Array.isArray(value)) {
       throw new Error(`不支持数组类型: ${fullPath}`);
     } else {
@@ -191,4 +196,30 @@ export function hasNestedPath(
  */
 export function deepClone<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj));
+}
+
+/**
+ * 递归深度合并：source（模板）覆盖 target，保留 target 已有值
+ * 当 source 有嵌套对象但 target 是基本类型时，用 source 结构覆盖
+ * 用于确保空嵌套对象的译文保持为 {} 而非 ""
+ */
+export function deepMergeTemplate(
+  target: Record<string, any>,
+  source: Record<string, any>
+): Record<string, any> {
+  const result = deepClone(target);
+  for (const [key, value] of Object.entries(source)) {
+    if (!(key in result)) {
+      result[key] = deepClone(value);
+    } else if (
+      value !== null && typeof value === 'object' && !Array.isArray(value)
+    ) {
+      if (result[key] !== null && typeof result[key] === 'object' && !Array.isArray(result[key])) {
+        result[key] = deepMergeTemplate(result[key], value);
+      } else {
+        result[key] = deepClone(value);
+      }
+    }
+  }
+  return result;
 }
