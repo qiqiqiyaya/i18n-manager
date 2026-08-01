@@ -1,10 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useEditorStore } from '@/stores/editorStore';
-import { SchemaObject, TranslationObject } from '@/types/schema';
-import { flattenObject } from '@/lib/utils';
+import { TranslationObject } from '@/types/schema';
 
 interface UseProjectEditorOptions {
   projectId: string;
@@ -12,6 +11,8 @@ interface UseProjectEditorOptions {
 
 export function useProjectEditor({ projectId }: UseProjectEditorOptions) {
   const setProjectId = useEditorStore((s) => s.setProjectId);
+  const setProjectTitle = useEditorStore((s) => s.setProjectTitle);
+  const setAvailableLocales = useEditorStore((s) => s.setAvailableLocales);
   const setSchema = useEditorStore((s) => s.setSchema);
   const setOpenLocales = useEditorStore((s) => s.setOpenLocales);
   const setActiveLang = useEditorStore((s) => s.setActiveLang);
@@ -26,6 +27,8 @@ export function useProjectEditor({ projectId }: UseProjectEditorOptions) {
       const res = await axios.get(`/api/projects/${projectId}`);
       const { meta, schema: schemaData, locales } = res.data.data;
       setProjectId(projectId);
+      setProjectTitle(meta?.title || '');
+      setAvailableLocales(locales || []);
       setSchema(schemaData || {});
 
       const localeMap: Record<string, TranslationObject> = {};
@@ -48,7 +51,7 @@ export function useProjectEditor({ projectId }: UseProjectEditorOptions) {
     } finally {
       setIsLoading(false);
     }
-  }, [projectId, setProjectId, setSchema, setOpenLocales, setActiveLang, setIsLoading, setIsDirty]);
+  }, [projectId, setProjectId, setProjectTitle, setAvailableLocales, setSchema, setOpenLocales, setActiveLang, setIsLoading, setIsDirty]);
 
   // 初始加载
   useEffect(() => {

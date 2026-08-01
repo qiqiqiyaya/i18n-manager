@@ -1,14 +1,15 @@
 'use client';
 
-import { useRef, useCallback, useEffect, useState, useMemo } from 'react';
+import { useRef, useCallback, useEffect, useState, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { Subject } from 'rxjs';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import { Alert, Popover, Tag, Typography } from 'antd';
-import { CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled, SyncOutlined } from '@ant-design/icons';
+import type { editor } from 'monaco-editor';
 import { useEditorStore } from '@/stores/editorStore';
 import { useCollaborationStore } from '@/stores/collaborationStore';
 import MonacoEditor, { type MonacoEditorHandle } from '@/components/json-editor/MonacoEditor';
 import { flattenObject } from '@/lib/utils';
+import type { TranslationObject } from '@/types/schema';
 
 const { Text } = Typography;
 
@@ -19,17 +20,21 @@ const PARSE_DEBOUNCE = parseInt(
 );
 
 interface LocaleEditorProps {
-  sendLocaleSave?: (lang: string, translations: Record<string, any>) => void;
+  sendLocaleSave?: (lang: string, translations: TranslationObject) => void;
+  onScrollChange?: (ratio: number) => void;
 }
 
-export default function LocaleEditor({ sendLocaleSave }: LocaleEditorProps) {
+/** LocaleEditor 句柄：MonacoEditorHandle + flushSave（Ctrl+S 手动保存） */
+export type LocaleEditorHandle = MonacoEditorHandle & { flushSave: () => void };
+
+const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
+  function LocaleEditor({ sendLocaleSave, onScrollChange }, ref) {
   const editorRef = useRef<MonacoEditorHandle>(null);
+
   const activeLang = useEditorStore((s) => s.activeLang);
   const openLocales = useEditorStore((s) => s.openLocales);
   const schema = useEditorStore((s) => s.schema);
   const updateTranslation = useEditorStore((s) => s.updateTranslation);
-  const saveStatus = useEditorStore((s) => s.saveStatus);
-  const saveError = useEditorStore((s) => s.saveError);
 
   // 编辑器本地文本管理
   const [editorText, setEditorText] = useState<string>('');
@@ -131,6 +136,20 @@ export default function LocaleEditor({ sendLocaleSave }: LocaleEditorProps) {
     };
   }, [activeLang, updateTranslation, sendLocaleSave]);
 
+  // ---------- 立即保存（Ctrl+S） ----------
+  // 直接调用 parseLogic 绕过防抖；parseLogic 内含内容哈希去重（无变化则跳过）
+  const flushSave = useCallback(() => {
+    if (!activeLang) return;
+    const text = editorTextRef.current;
+    parseLogic(text);
+  }, [activeLang, parseLogic]);
+
+  // 向外暴露内部 editorRef（同步滚动）+ flushSave（手动保存）
+  useImperativeHandle(ref, () => ({
+    ...(editorRef.current as MonacoEditorHandle),
+    flushSave,
+  }), [editorRef, flushSave]);
+
   // 建立 RxJS Subject + 防抖订阅
   useEffect(() => {
     const subject = new Subject<string>();
@@ -179,13 +198,35 @@ export default function LocaleEditor({ sendLocaleSave }: LocaleEditorProps) {
     }
   }, []); // 空依赖：editorTextRef.current 始终保持最新
 
-  // ---------- 推断光标位置的键路径 ----------
-  const inferKeyPath = useCallback((lineContent: string): string | null => {
-    const keyMatch = lineContent.match(/^\s*"([^"]+)"\s*:/);
-    if (keyMatch) {
-      return keyMatch[1];
+  // ---------- 推断光标位置的完整键路径 ----------
+  // 支持嵌套结构：向上扫描以更浅缩进开启对象且包裹当前键的父级，拼出点分路径
+  // 例：{"a": {"b": "x"}} 光标在 "b" 行 → 返回 "a.b"
+  const inferKeyPath = useCallback((model: editor.ITextModel, lineNumber: number): string | null => {
+    const currentLine = model.getLineContent(lineNumber);
+    const keyMatch = currentLine.match(/^\s*"([^"]+)"\s*:/);
+    if (!keyMatch) return null;
+
+    const path: string[] = [keyMatch[1]];
+    const currentIndent = (currentLine.match(/^\s*/)?.[0] ?? '').length;
+    let parentIndent = currentIndent;
+
+    // 向上扫描寻找父级键（缩进更浅、且开启对象包裹当前键）
+    for (let i = lineNumber - 1; i >= 1; i--) {
+      const line = model.getLineContent(i);
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      const indent = (line.match(/^\s*/)?.[0] ?? '').length;
+      if (indent >= parentIndent) continue;
+
+      const parentMatch = line.match(/^\s*"([^"]+)"\s*:\s*\{/);
+      if (parentMatch) {
+        path.unshift(parentMatch[1]);
+        parentIndent = indent;
+      }
     }
-    return null;
+
+    return path.join('.');
   }, []);
 
   const handleCursorPosition = useCallback(() => {
@@ -195,8 +236,10 @@ export default function LocaleEditor({ sendLocaleSave }: LocaleEditorProps) {
     const position = editor.getPosition();
     if (!position) return;
 
-    const lineContent = editor.getModel()?.getLineContent(position.lineNumber) || '';
-    const key = inferKeyPath(lineContent);
+    const model = editor.getModel();
+    if (!model) return;
+
+    const key = inferKeyPath(model, position.lineNumber);
     if (key) {
       setReferenceKey(key);
       setReferenceVisible(true);
@@ -207,11 +250,11 @@ export default function LocaleEditor({ sendLocaleSave }: LocaleEditorProps) {
 
   // ---------- Monaco 编辑器挂载时注册事件监听 ----------
   // 稳定引用：配合 MonacoEditor 的 React.memo 防止不必要的重渲染级联
-  const handleEditorMount = useCallback((editor: any) => {
-    editor.onDidChangeCursorPosition(() => {
+  const handleEditorMount = useCallback((editorInstance: editor.IStandaloneCodeEditor) => {
+    editorInstance.onDidChangeCursorPosition(() => {
       handleCursorPosition();
     });
-    editor.onDidBlurEditorText(() => {
+    editorInstance.onDidBlurEditorText(() => {
       handleBlur();
     });
   }, [handleCursorPosition, handleBlur]);
@@ -241,7 +284,7 @@ export default function LocaleEditor({ sendLocaleSave }: LocaleEditorProps) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 'calc(100vh - 200px)', color: '#999' }}>
         <div style={{ textAlign: 'center' }}>
           <p style={{ fontSize: 16, marginBottom: 8 }}>暂无语言</p>
-          <p>请点击 "+" 按钮添加语言</p>
+          <p>请点击 &quot;+&quot; 按钮添加语言</p>
         </div>
       </div>
     );
@@ -281,37 +324,36 @@ export default function LocaleEditor({ sendLocaleSave }: LocaleEditorProps) {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-      {/* 锁定提示 */}
-      {hasLocks && (
-        <div style={{ padding: '4px 12px', background: '#fff7e6', borderBottom: '1px solid #ffd591', fontSize: 12, color: '#d46b08', flexShrink: 0 }}>
-          <span role="img" aria-label="lock">🔒</span> 有 {Object.keys(activeLocks).length} 个键正在被他人编辑
-        </div>
-      )}
+      {/* 条件提示（绝对定位浮层，不挤占编辑器空间，保持与 Schema 编辑器高度一致） */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, display: 'flex', flexDirection: 'column' }}>
+        {hasLocks && (
+          <div style={{ padding: '4px 12px', background: '#fff7e6', borderBottom: '1px solid #ffd591', fontSize: 12, color: '#d46b08' }}>
+            <span role="img" aria-label="lock">🔒</span> 有 {Object.keys(activeLocks).length} 个键正在被他人编辑
+          </div>
+        )}
 
-      {/* Schema 变更警告（用户编辑中时外部 Schema 更新） */}
-      {schemaChangeWarning && (
-        <div style={{ padding: '4px 12px', background: '#fffbe6', borderBottom: '1px solid #ffe58f', fontSize: 12, color: '#d48806', flexShrink: 0 }}>
-          <span role="img" aria-label="warning">⚠️</span> Schema 已更新，完成编辑后保存以应用新结构
-        </div>
-      )}
+        {schemaChangeWarning && (
+          <div style={{ padding: '4px 12px', background: '#fffbe6', borderBottom: '1px solid #ffe58f', fontSize: 12, color: '#d48806' }}>
+            <span role="img" aria-label="warning">⚠️</span> Schema 已更新，完成编辑后保存以应用新结构
+          </div>
+        )}
 
-      {/* JSON 校验提示 */}
-      {validationError && (
-        <Alert
-          title={validationError}
-          type="error"
-          showIcon
-          closable
-          onClose={() => setValidationError(null)}
-          style={{
-            padding: '4px 12px',
-            fontSize: 12,
-            borderRadius: 0,
-            border: 'none',
-            flexShrink: 0,
-          }}
-        />
-      )}
+        {validationError && (
+          <Alert
+            title={validationError}
+            type="error"
+            showIcon
+            closable
+            onClose={() => setValidationError(null)}
+            style={{
+              padding: '4px 12px',
+              fontSize: 12,
+              borderRadius: 0,
+              border: 'none',
+            }}
+          />
+        )}
+      </div>
 
       {/* 翻译参考 + 编辑器 */}
       <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
@@ -330,51 +372,13 @@ export default function LocaleEditor({ sendLocaleSave }: LocaleEditorProps) {
               onChange={handleChange}
               height="100%"
               onEditorMount={handleEditorMount}
+              onScrollChange={onScrollChange}
             />
           </div>
         </Popover>
       </div>
-
-      {/* 保存状态 + JSON 校验指示器（底部状态栏） */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'flex-end',
-          padding: '2px 8px',
-          borderTop: '1px solid #303030',
-          background: '#252526',
-          flexShrink: 0,
-          gap: 6,
-        }}
-      >
-        {validationError ? (
-          <span style={{ fontSize: 11, color: '#f44747', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <CloseCircleFilled style={{ color: '#f44747' }} />
-            {validationError}
-          </span>
-        ) : saveStatus === 'saving' ? (
-          <span style={{ fontSize: 11, color: '#1890ff', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <SyncOutlined spin style={{ color: '#1890ff' }} />
-            保存中...
-          </span>
-        ) : saveStatus === 'error' ? (
-          <span style={{ fontSize: 11, color: '#f44747', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <CloseCircleFilled style={{ color: '#f44747' }} />
-            保存失败{saveError ? `: ${saveError}` : ''}
-          </span>
-        ) : saveStatus === 'dirty' ? (
-          <span style={{ fontSize: 11, color: '#d4b106', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <ExclamationCircleFilled style={{ color: '#d4b106' }} />
-            未保存
-          </span>
-        ) : (
-          <span style={{ fontSize: 11, color: '#4ec9b0', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <CheckCircleFilled style={{ color: '#4ec9b0' }} />
-            已保存
-          </span>
-        )}
-      </div>
     </div>
   );
-}
+});
+
+export default LocaleEditor;

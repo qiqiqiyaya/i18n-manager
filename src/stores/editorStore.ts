@@ -8,6 +8,8 @@ export type SaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
 
 interface EditorState {
   projectId: string | null;
+  projectTitle: string;
+  availableLocales: string[];
   schema: SchemaObject;
   openLocales: Record<string, TranslationObject>;
   activeLang: string | null;
@@ -17,6 +19,8 @@ interface EditorState {
   saveError: string | null;
 
   setProjectId: (id: string) => void;
+  setProjectTitle: (title: string) => void;
+  setAvailableLocales: (locales: string[]) => void;
   setSchema: (schema: SchemaObject) => void;
   updateSchema: (schema: SchemaObject) => void;
   setOpenLocales: (locales: Record<string, TranslationObject>) => void;
@@ -34,6 +38,8 @@ interface EditorState {
 
 const initialState = {
   projectId: null,
+  projectTitle: '',
+  availableLocales: [] as string[],
   schema: {},
   openLocales: {},
   activeLang: null,
@@ -47,6 +53,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   ...initialState,
 
   setProjectId: (projectId) => set({ projectId }),
+  setProjectTitle: (projectTitle) => set({ projectTitle }),
+  setAvailableLocales: (availableLocales) => set({ availableLocales }),
   setSchema: (schema) => set({ schema }),
   updateSchema: (schema) => set({ schema, isDirty: true, saveStatus: 'dirty' }),
   setOpenLocales: (locales) => set({ openLocales: locales }),

@@ -45,7 +45,10 @@ export default function LanguageTabs({
       setAddLangModalOpen(false); setNewLang('');
       message.success(`语言 "${newLang}" 已添加`);
       onRefreshLocales();
-    } catch (err: any) { message.error(err.response?.data?.message || '添加失败'); }
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      message.error(msg || '添加失败');
+    }
     finally { setAdding(false); }
   };
 
@@ -70,10 +73,10 @@ export default function LanguageTabs({
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <Tabs activeKey={activeLang || undefined} onChange={setActiveLang}
-          items={tabItems} type="card" size="small" style={{ flex: 1 }} hideAdd />
+          items={tabItems} type="card" size="small" style={{ flex: 1 }}
+          tabBarStyle={{ margin: 0 }} hideAdd />
         <Dropdown menu={{ items: dropdownItems }} trigger={['click']}>
-          <Button type="text" icon={<PlusOutlined />}
-            disabled={availableLocales.length > 0 && unopenedLocales.length === 0} />
+          <Button type="text" icon={<PlusOutlined />} />
         </Dropdown>
       </div>
       <Modal title="添加新语言" open={addLangModalOpen} onOk={handleAddLanguage}

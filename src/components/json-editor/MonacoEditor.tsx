@@ -23,6 +23,7 @@ export interface MonacoEditorHandle {
   formatDocument: () => void;
   getEditor: () => editor.IStandaloneCodeEditor | null;
   getCursorPosition: () => { lineNumber: number; column: number } | null;
+  scrollToRatio: (ratio: number) => void;
 }
 
 interface MonacoEditorProps {
@@ -33,6 +34,7 @@ interface MonacoEditorProps {
   height?: string;
   options?: editor.IStandaloneEditorConstructionOptions;
   onEditorMount?: (editor: editor.IStandaloneCodeEditor) => void;
+  onScrollChange?: (ratio: number) => void;
 }
 
 const DEFAULT_OPTIONS: editor.IStandaloneEditorConstructionOptions = {
@@ -62,19 +64,20 @@ function MonacoEditorComponent(
     height = '100%',
     options,
     onEditorMount,
+    onScrollChange,
   }: MonacoEditorProps,
   ref: React.Ref<MonacoEditorHandle>
 ) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
-  const monacoRef = useRef<any>(null);
   const [isReady, setIsReady] = useState(false);
   /** 标记 onChange 是否由用户键入触发，防止 value prop 回写时重置光标 */
   const fromUserRef = useRef(false);
+  /** 标记是否正在同步滚动，防止循环触发 */
+  const isSyncingScrollRef = useRef(false);
 
   const handleMount: OnMount = useCallback(
-    (editorInstance, monaco) => {
+    (editorInstance) => {
       editorRef.current = editorInstance;
-      monacoRef.current = monaco;
       setIsReady(true);
 
       // 粘贴时自动格式化
@@ -84,9 +87,25 @@ function MonacoEditorComponent(
         }, 100);
       });
 
+      // 滚动同步：使用 rAF 节流，计算滚动比例（0-1）
+      let scrollRafId: number | null = null;
+      editorInstance.onDidScrollChange(() => {
+        if (scrollRafId !== null) return;
+        if (isSyncingScrollRef.current) return;
+        scrollRafId = requestAnimationFrame(() => {
+          scrollRafId = null;
+          const scrollTop = editorInstance.getScrollTop();
+          const scrollHeight = editorInstance.getScrollHeight();
+          const clientHeight = editorInstance.getLayoutInfo()?.height ?? 0;
+          const maxScroll = Math.max(0, scrollHeight - clientHeight);
+          const ratio = maxScroll > 0 ? scrollTop / maxScroll : 0;
+          onScrollChange?.(ratio);
+        });
+      });
+
       onEditorMount?.(editorInstance);
     },
-    [onEditorMount]
+    [onEditorMount, onScrollChange]
   );
 
   const handleChange = useCallback(
@@ -153,7 +172,7 @@ function MonacoEditorComponent(
           const findAction = editor.getAction('actions.find');
           if (findAction) {
             findAction.run().then(() => {
-              const controller = editor.getContribution('editor.contrib.findController') as any;
+              const controller = editor.getContribution('editor.contrib.findController') as { setSearchString: (value: string) => void } | null;
               if (controller) {
                 controller.setSearchString(term);
               }
@@ -171,6 +190,17 @@ function MonacoEditorComponent(
         const pos = editor.getPosition();
         if (!pos) return null;
         return { lineNumber: pos.lineNumber, column: pos.column };
+      },
+      scrollToRatio: (ratio: number) => {
+        const editor = editorRef.current;
+        if (!editor) return;
+        isSyncingScrollRef.current = true;
+        const scrollHeight = editor.getScrollHeight();
+        const clientHeight = editor.getLayoutInfo()?.height ?? 0;
+        const maxScroll = Math.max(0, scrollHeight - clientHeight);
+        editor.setScrollTop(Math.round(ratio * maxScroll));
+        // 延迟重置同步标记，让 scroll 事件有时间触发并被跳过
+        setTimeout(() => { isSyncingScrollRef.current = false; }, 50);
       },
     }),
     []

@@ -6,6 +6,43 @@
                 "-y",
                 "next-devtools-mcp@latest"
             ]
+        },
+        "context7": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@upstash/context7-mcp@latest",
+                "--api-key",
+                "i18nManager"
+            ],
+            "description": "实时文档查询 — Next.js/React/Express 等库文档"
+        },
+        "sequential-thinking": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-sequential-thinking"
+            ],
+            "description": "链式推理 — 复杂问题逐步分析"
+        },
+        "filesystem": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-filesystem",
+                "D:\\Test\\Ai\\i18n-manager"
+            ],
+            "description": "文件系统操作（已配置为本项目路径）"
+        },
+        "playwright": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@playwright/mcp",
+                "--browser",
+                "chrome"
+            ],
+            "description": "浏览器自动化与 E2E 测试"
         }
     }
 }

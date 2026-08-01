@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useCallback, useEffect, useState, useMemo } from 'react';
+import { useRef, useCallback, useEffect, useState, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { Subject } from 'rxjs';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import { Button, Space, Tooltip } from 'antd';
@@ -9,6 +9,7 @@ import { useEditorStore } from '@/stores/editorStore';
 import MonacoEditor, { type MonacoEditorHandle } from '@/components/json-editor/MonacoEditor';
 import { flattenObject, getLeafPaths } from '@/lib/utils';
 import type { SchemaUpdatedPayload } from '@/types/collaboration';
+import type { SchemaObject } from '@/types/schema';
 import type { editor } from 'monaco-editor';
 
 /** 自动保存防抖延迟与 Schema 校验防抖共享同一值 */
@@ -43,12 +44,18 @@ function detectRenames(removedKeys: string[], newKeys: string[]): Record<string,
 
 interface SchemaEditorProps {
   sendSchemaUpdated?: (data: Omit<SchemaUpdatedPayload, 'projectId'>) => void;
-  sendSchemaSave?: (data: { schema: Record<string, any>; addedKeys: string[]; removedKeys: string[] }) => void;
+  sendSchemaSave?: (data: { schema: SchemaObject; addedKeys: string[]; removedKeys: string[] }) => void;
   socketId?: string;
+  onScrollChange?: (ratio: number) => void;
 }
 
-export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socketId }: SchemaEditorProps) {
+/** SchemaEditor 句柄：MonacoEditorHandle + flushSave（Ctrl+S 手动保存） */
+export type SchemaEditorHandle = MonacoEditorHandle & { flushSave: () => void };
+
+const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
+  function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socketId, onScrollChange }, ref) {
   const editorRef = useRef<MonacoEditorHandle>(null);
+
   const schema = useEditorStore((s) => s.schema);
   const openLocales = useEditorStore((s) => s.openLocales);
   const updateSchema = useEditorStore((s) => s.updateSchema);
@@ -239,6 +246,19 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
     };
   }, [updateSchema, applyLocaleSync, sendSchemaUpdated, sendSchemaSave, socketId, setMonacoMarkers]);
 
+  // ---------- 立即保存（Ctrl+S） ----------
+  // 直接调用 parseLogic 绕过防抖；parseLogic 内含内容哈希去重（无变化则跳过）
+  const flushSave = useCallback(() => {
+    const text = editorTextRef.current;
+    parseLogic(text);
+  }, [parseLogic]);
+
+  // 向外暴露内部 editorRef（同步滚动）+ flushSave（手动保存）
+  useImperativeHandle(ref, () => ({
+    ...(editorRef.current as MonacoEditorHandle),
+    flushSave,
+  }), [editorRef, flushSave]);
+
   // 建立 RxJS Subject + 防抖订阅
   useEffect(() => {
     const subject = new Subject<string>();
@@ -294,16 +314,15 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
   }, [setMonacoMarkers]);
 
   // ---------- Monaco 编辑器挂载时注册 blur 监听 + 保存 monaco 实例 ----------
-  const handleEditorMount = useCallback((editor: any) => {
+  const handleEditorMount = useCallback((editorInstance: editor.IStandaloneCodeEditor) => {
     try {
-      const editorInstance = editor as editor.IStandaloneCodeEditor;
       editorInstanceRef.current = editorInstance;
-      // @ts-ignore — monaco 实例通过全局访问
-      monacoRef.current = (window as any).monaco;
+      // monaco 实例通过全局访问（@monaco-editor/react 挂载到 window.monaco）
+      monacoRef.current = (window as { monaco?: unknown }).monaco as typeof import('monaco-editor');
     } catch {
       // 静默失败，标记功能降级
     }
-    editor.onDidBlurEditorText(() => {
+    editorInstance.onDidBlurEditorText(() => {
       handleBlur();
     });
   }, [handleBlur]);
@@ -321,9 +340,9 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
     }
 
     // 从编辑器当前 JSON 文本解析嵌套结构，添加新键到根级别
-    let currentNested: Record<string, any>;
+    let currentNested: SchemaObject;
     try {
-      currentNested = JSON.parse(editorTextRef.current);
+      currentNested = JSON.parse(editorTextRef.current) as SchemaObject;
     } catch {
       currentNested = {};
     }
@@ -385,7 +404,9 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '4px 8px',
+          height: 32,
+          padding: '0 8px',
+          boxSizing: 'border-box',
           borderBottom: '1px solid #303030',
           background: '#252526',
           flexShrink: 0,
@@ -467,9 +488,12 @@ export default function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socket
           value={editorText}
           onChange={handleChange}
           onEditorMount={handleEditorMount}
+          onScrollChange={onScrollChange}
           height="100%"
         />
       </div>
     </div>
   );
-}
+});
+
+export default SchemaEditor;
