@@ -43,9 +43,19 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
   const lastSyncedRef = useRef<string>('');
   const parseSubjectRef = useRef<Subject<string> | null>(null);
   const isEditingRef = useRef(false);
+  // 标记程序正在通过 setValue 写入 Monaco，此时 onChange 回调应忽略
+  // Monaco 的 setValue 即使值不变也会触发 onDidChangeContent，需要此标志防止误判用户编辑
+  const isProgrammaticChangeRef = useRef(false);
   // 用 ref 追踪最新 editorText，避免 blur handler 闭包过期
   const editorTextRef = useRef(editorText);
   editorTextRef.current = editorText;
+  // 追踪上一个 activeLang，用于切 Tab 时 flush 旧语言编辑内容
+  const prevActiveLangRef = useRef(activeLang);
+  // 用 ref 存 activeLang/openLocales，供 handleBlur 使用，避免依赖变化导致 handleEditorMount 重建
+  const activeLangRef = useRef(activeLang);
+  activeLangRef.current = activeLang;
+  const openLocalesRef = useRef(openLocales);
+  openLocalesRef.current = openLocales;
 
   // 翻译参考浮层状态
   const [referenceKey, setReferenceKey] = useState<string | null>(null);
@@ -58,50 +68,78 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
   // Schema 变更警告（用户编辑中时外部更新了数据）
   const [schemaChangeWarning, setSchemaChangeWarning] = useState(false);
 
-  // ---------- 切换语言或外部数据更新时同步到编辑器 ----------
-  // 仅在用户未主动编辑时覆盖编辑器内容
+  // ---------- 辅助：从 store 同步内容到 Monaco 编辑器 ----------
+  // 序列化 → setEditorText → setValue（带 programmatic flag 防止误触发 onChange）
+  // preservePosition: 是否在写入后恢复光标和滚动位置（外部数据更新时需要）
+  const syncEditorFromStore = useCallback((preservePosition = false) => {
+    if (!activeLang || !openLocales[activeLang]) return;
+
+    const editor = preservePosition ? editorRef.current?.getEditor() : null;
+    const position = editor?.getPosition();
+    const scrollTop = editor?.getScrollTop();
+    const scrollLeft = editor?.getScrollLeft();
+
+    const formatted = JSON.stringify(openLocales[activeLang], null, 2);
+    setEditorText(formatted);
+    lastSyncedRef.current = formatted;
+    setValidationError(null);
+    isProgrammaticChangeRef.current = true;
+    editorRef.current?.setValue(formatted);
+    isProgrammaticChangeRef.current = false;
+
+    if (preservePosition && editor && position) {
+      const model = editor.getModel();
+      if (model) {
+        const maxLine = model.getLineCount();
+        const restoredLine = Math.min(position.lineNumber, maxLine);
+        const maxCol = model.getLineMaxColumn(restoredLine);
+        const restoredCol = Math.min(position.column, maxCol);
+        editor.setPosition({ lineNumber: restoredLine, column: restoredCol });
+      }
+      if (scrollTop !== undefined) {
+        editor.setScrollPosition({ scrollTop, scrollLeft });
+      }
+    }
+  }, [activeLang, openLocales]);
+
+  // ---------- 切换语言时强制同步编辑器 ----------
+  // 用户切换 Tab → 先 flush 旧语言的编辑内容到 store，再加载新语言
   useEffect(() => {
+    const prevLang = prevActiveLangRef.current;
+    // 切走前：如果旧语言有未保存的编辑内容，flush 到 store（绕过防抖）
+    // parseLogic 内部有哈希去重，无变化时不会触发 saveStatus 变更
+    if (prevLang && prevLang !== activeLang && isEditingRef.current) {
+      parseLogic(editorTextRef.current);
+    }
+
+    isEditingRef.current = false;
+    setSchemaChangeWarning(false);
+    prevActiveLangRef.current = activeLang;
+
+    if (activeLang && openLocales[activeLang]) {
+      syncEditorFromStore();
+    } else if (!activeLang) {
+      setEditorText('');
+    }
+  }, [activeLang]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---------- 外部数据更新时（相同语言、openLocales 内容变化） ----------
+  // 仅在用户未编辑时覆盖；用户编辑中则显示警告
+  useEffect(() => {
+    if (!activeLang) return;
+
     if (isEditingRef.current) {
-      // 用户正在编辑，不刷新编辑器，显示警告
       setSchemaChangeWarning(true);
       return;
     }
 
     setSchemaChangeWarning(false);
 
-    if (activeLang && openLocales[activeLang]) {
-      const formatted = JSON.stringify(openLocales[activeLang], null, 2);
-      if (formatted !== editorText) {
-        // 保存当前光标和滚动位置
-        const editor = editorRef.current?.getEditor();
-        const position = editor?.getPosition();
-        const scrollTop = editor?.getScrollTop();
-        const scrollLeft = editor?.getScrollLeft();
-
-        setEditorText(formatted);
-        lastSyncedRef.current = formatted;
-        setValidationError(null);
-        editorRef.current?.setValue(formatted);
-
-        // 尝试恢复光标位置（在有效范围内钳制）
-        if (editor && position) {
-          const model = editor.getModel();
-          if (model) {
-            const maxLine = model.getLineCount();
-            const restoredLine = Math.min(position.lineNumber, maxLine);
-            const maxCol = model.getLineMaxColumn(restoredLine);
-            const restoredCol = Math.min(position.column, maxCol);
-            editor.setPosition({ lineNumber: restoredLine, column: restoredCol });
-          }
-          if (scrollTop !== undefined) {
-            editor.setScrollPosition({ scrollTop, scrollLeft });
-          }
-        }
-      }
-    } else if (!activeLang) {
-      setEditorText('');
+    const formatted = JSON.stringify(openLocales[activeLang], null, 2);
+    if (formatted !== editorText) {
+      syncEditorFromStore(true);
     }
-  }, [activeLang, openLocales]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [openLocales]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------- RxJS 防抖解析 JSON 并同步到 store ----------
   // 使用 Subject + debounceTime + distinctUntilChanged 替代手动 setTimeout/clearTimeout
@@ -171,6 +209,8 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
   // ---------- 编辑器内容变更 ----------
   const handleChange = useCallback(
     (value: string) => {
+      // 程序写入（setValue）触发的 onChange，跳过
+      if (isProgrammaticChangeRef.current) return;
       isEditingRef.current = true;
       setEditorText(value);
       setValidationError(null);
@@ -179,11 +219,25 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
     []  // parseSubjectRef 是 ref，不需要依赖
   );
 
-  // ---------- 失去焦点时校验 ----------
+  // ---------- 失去焦点时校验并同步 sanitized 内容 ----------
   // 注：使用 ref 而非 editorText state，因为 blur handler 在
   // onEditorMount 中注册（仅一次），闭包会捕获过期的 editorText
+  // 同时用 ref 存 activeLang/openLocales，避免依赖变化导致 handleEditorMount 重建
   const handleBlur = useCallback(() => {
     isEditingRef.current = false;
+    const lang = activeLangRef.current;
+    const locales = openLocalesRef.current;
+    // 从 store 同步 sanitized 内容回编辑器（补回误删的 key，值为空）
+    if (lang && locales[lang]) {
+      const sanitized = JSON.stringify(locales[lang], null, 2);
+      if (sanitized !== editorTextRef.current) {
+        setEditorText(sanitized);
+        lastSyncedRef.current = sanitized;
+        isProgrammaticChangeRef.current = true;
+        editorRef.current?.setValue(sanitized);
+        isProgrammaticChangeRef.current = false;
+      }
+    }
     const text = editorTextRef.current;
     try {
       const parsed = JSON.parse(text);
@@ -196,7 +250,7 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
       const msg = e instanceof Error ? e.message : 'JSON 格式错误';
       setValidationError(msg);
     }
-  }, []); // 空依赖：editorTextRef.current 始终保持最新
+  }, []); // 空依赖：全部通过 ref 读取最新值
 
   // ---------- 推断光标位置的完整键路径 ----------
   // 支持嵌套结构：向上扫描以更浅缩进开启对象且包裹当前键的父级，拼出点分路径

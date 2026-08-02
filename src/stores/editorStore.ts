@@ -104,11 +104,17 @@ export const useEditorStore = create<EditorState>((set) => ({
   setActiveLang: (lang) => set({ activeLang: lang }),
 
   updateTranslation: (lang, translations) =>
-    set((state) => ({
-      openLocales: { ...state.openLocales, [lang]: translations },
-      isDirty: true,
-      saveStatus: 'dirty',
-    })),
+    set((state) => {
+      // 按 Schema 结构裁剪译文：补回缺失的 key（空值），移除 Schema 中不存在的 key
+      // 依赖 Object.entries 迭代顺序与 Schema 模板一致（V8 引擎保证插入顺序）
+      const template = emptyTranslationsFromSchema(state.schema);
+      const sanitized = deepMergeTemplate(translations, template);
+      return {
+        openLocales: { ...state.openLocales, [lang]: sanitized },
+        isDirty: true,
+        saveStatus: 'dirty',
+      };
+    }),
 
   applyLocaleSync: (addedKeys, removedKeys, renameMap?) =>
     set((state) => {
