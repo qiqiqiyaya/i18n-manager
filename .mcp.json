@@ -30,7 +30,7 @@
             "args": [
                 "-y",
                 "@modelcontextprotocol/server-filesystem",
-                "D:\\Test\\Ai\\i18n-manager"
+                "D:\\My Respository\\i18n-manager"
             ],
             "description": "文件系统操作（已配置为本项目路径）"
         },
