@@ -4,7 +4,7 @@ import { useRef, useCallback, useEffect, useState, useMemo, forwardRef, useImper
 import { Subject } from 'rxjs';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import { Button, Space, Tooltip } from 'antd';
-import { PlusOutlined, CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled, SyncOutlined } from '@ant-design/icons';
+import { PlusOutlined, CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled, SyncOutlined, SortAscendingOutlined } from '@ant-design/icons';
 import { useEditorStore } from '@/stores/editorStore';
 import MonacoEditor, { type MonacoEditorHandle } from '@/components/json-editor/MonacoEditor';
 import { flattenObject, getLeafPaths } from '@/lib/utils';
@@ -62,6 +62,7 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
   const applyLocaleSync = useEditorStore((s) => s.applyLocaleSync);
   const saveStatus = useEditorStore((s) => s.saveStatus);
   const saveError = useEditorStore((s) => s.saveError);
+  const sortAllKeys = useEditorStore((s) => s.sortAllKeys);
 
   // Monaco 编辑器实例引用（用于添加标记）
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null);
@@ -92,6 +93,8 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
 
   // 标记 store 变更是否由本用户的操作触发（阻止回写覆盖编辑器）
   const isSelfOriginatedChangeRef = useRef(false);
+  // 标记程序正在通过 setValue 写入 Monaco，此时 onChange 回调应忽略
+  const isProgrammaticChangeRef = useRef(false);
 
   // ---------- 接收外部 store 更新（如 WebSocket 广播后的数据重载） ----------
   useEffect(() => {
@@ -119,7 +122,9 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
       lastSyncedRef.current = formatted;
       setValidationStatus('valid');
       setValidationMessage(null);
+      isProgrammaticChangeRef.current = true;
       editorRef.current?.setValue(formatted);
+      isProgrammaticChangeRef.current = false;
 
       // 尝试恢复光标位置（在有效范围内钳制）
       if (editor && position) {
@@ -255,9 +260,16 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
 
   // 向外暴露内部 editorRef（同步滚动）+ flushSave（手动保存）
   useImperativeHandle(ref, () => ({
-    ...(editorRef.current as MonacoEditorHandle),
+    getValue: () => editorRef.current?.getValue() ?? '',
+    setValue: (value: string) => editorRef.current?.setValue(value),
+    focus: () => editorRef.current?.focus(),
+    find: (term: string) => editorRef.current?.find(term),
+    formatDocument: () => editorRef.current?.formatDocument(),
+    getEditor: () => editorRef.current?.getEditor() ?? null,
+    getCursorPosition: () => editorRef.current?.getCursorPosition() ?? null,
+    scrollToRatio: (ratio: number) => editorRef.current?.scrollToRatio(ratio),
     flushSave,
-  }), [editorRef, flushSave]);
+  }), [flushSave]);
 
   // 建立 RxJS Subject + 防抖订阅
   useEffect(() => {
@@ -280,6 +292,8 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
   // ---------- 编辑器内容变更 ----------
   const handleChange = useCallback(
     (value: string) => {
+      // 程序写入（setValue）触发的 onChange，跳过
+      if (isProgrammaticChangeRef.current) return;
       isEditingRef.current = true;
       setEditorText(value);
       // 防抖结束后会通过 parseLogic 更新状态，此处不需要立即清除
@@ -356,7 +370,9 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
     lastSyncedRef.current = formatted;
     setValidationStatus('valid');
     setValidationMessage(null);
+    isProgrammaticChangeRef.current = true;
     editorRef.current?.setValue(formatted);
+    isProgrammaticChangeRef.current = false;
 
     // 标记为自身操作，阻止 useEffect 回写
     isSelfOriginatedChangeRef.current = true;
@@ -396,6 +412,20 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
     editorRef.current?.formatDocument();
   }, []);
 
+  const handleSort = useCallback(() => {
+    sortAllKeys();
+    // 排序后自动保存 Schema 到磁盘
+    if (sendSchemaSave) {
+      const state = useEditorStore.getState();
+      const newFlatKeys = getLeafPaths(state.schema);
+      sendSchemaSave({
+        schema: state.schema,
+        addedKeys: newFlatKeys,
+        removedKeys: [],
+      });
+    }
+  }, [sortAllKeys, sendSchemaSave]);
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* 工具栏 */}
@@ -433,6 +463,17 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
           >
             格式化
           </Button>
+          <Tooltip title="将 Schema 和所有译文的 key 按字典序排序并保存">
+            <Button
+              type="text"
+              size="small"
+              icon={<SortAscendingOutlined />}
+              onClick={handleSort}
+              style={{ color: '#ccc' }}
+            >
+              排序
+            </Button>
+          </Tooltip>
         </Space>
 
         {/* 保存状态 + JSON 校验指示器（右上角工具栏） */}

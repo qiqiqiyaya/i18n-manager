@@ -107,9 +107,25 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
   useEffect(() => {
     const prevLang = prevActiveLangRef.current;
     // 切走前：如果旧语言有未保存的编辑内容，flush 到 store（绕过防抖）
-    // parseLogic 内部有哈希去重，无变化时不会触发 saveStatus 变更
+    // 不能用 parseLogic（其 useMemo 闭包中 activeLang 可能已变为新语言），
+    // 直接用 updateTranslation + prevLang 确保写入正确的语言
     if (prevLang && prevLang !== activeLang && isEditingRef.current) {
-      parseLogic(editorTextRef.current);
+      const text = editorTextRef.current;
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const currentHash = JSON.stringify(parsed);
+          if (currentHash !== lastSyncedRef.current) {
+            updateTranslation(prevLang, parsed);
+            lastSyncedRef.current = currentHash;
+            if (sendLocaleSave) {
+              sendLocaleSave(prevLang, parsed);
+            }
+          }
+        }
+      } catch {
+        // JSON 不合法时不 flush（用户可能在编辑中途切换）
+      }
     }
 
     isEditingRef.current = false;
@@ -184,9 +200,16 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
 
   // 向外暴露内部 editorRef（同步滚动）+ flushSave（手动保存）
   useImperativeHandle(ref, () => ({
-    ...(editorRef.current as MonacoEditorHandle),
+    getValue: () => editorRef.current?.getValue() ?? '',
+    setValue: (value: string) => editorRef.current?.setValue(value),
+    focus: () => editorRef.current?.focus(),
+    find: (term: string) => editorRef.current?.find(term),
+    formatDocument: () => editorRef.current?.formatDocument(),
+    getEditor: () => editorRef.current?.getEditor() ?? null,
+    getCursorPosition: () => editorRef.current?.getCursorPosition() ?? null,
+    scrollToRatio: (ratio: number) => editorRef.current?.scrollToRatio(ratio),
     flushSave,
-  }), [editorRef, flushSave]);
+  }), [flushSave]);
 
   // 建立 RxJS Subject + 防抖订阅
   useEffect(() => {

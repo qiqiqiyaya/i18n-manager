@@ -46,8 +46,9 @@ export default function ProjectEditorPage({ params }: Props) {
     isScrollingRef.current = true;
     scrollRatioRef.current = ratio;
     localeEditorRef.current?.scrollToRatio(ratio);
-    // MonacoEditor 内部会用 setTimeout 50ms 重置 isSyncingScrollRef，这里也同步重置
-    setTimeout(() => { isScrollingRef.current = false; }, 60);
+    // 微任务重置：MonacoEditor 内部 scrollToRatio 通过 queueMicrotask 重置其内部 flag，
+    // 此处同样用微任务，保证下一轮事件循环即可恢复滚动同步
+    queueMicrotask(() => { isScrollingRef.current = false; });
   }, []);
 
   const handleLocaleScroll = useCallback((ratio: number) => {
@@ -55,7 +56,7 @@ export default function ProjectEditorPage({ params }: Props) {
     isScrollingRef.current = true;
     scrollRatioRef.current = ratio;
     schemaEditorRef.current?.scrollToRatio(ratio);
-    setTimeout(() => { isScrollingRef.current = false; }, 60);
+    queueMicrotask(() => { isScrollingRef.current = false; });
   }, []);
 
   // Ctrl+S 手动保存：调用子级组件的 flushSave（内部含去重，无变化不保存）

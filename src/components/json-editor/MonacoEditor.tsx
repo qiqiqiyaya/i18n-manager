@@ -199,8 +199,9 @@ function MonacoEditorComponent(
         const clientHeight = editor.getLayoutInfo()?.height ?? 0;
         const maxScroll = Math.max(0, scrollHeight - clientHeight);
         editor.setScrollTop(Math.round(ratio * maxScroll));
-        // 延迟重置同步标记，让 scroll 事件有时间触发并被跳过
-        setTimeout(() => { isSyncingScrollRef.current = false; }, 50);
+        // 微任务重置：比 setTimeout 快得多，setScrollTop 触发的 scroll 事件在同一帧内处理完
+        // 后立即重置 flag，不会引入可感知的延迟
+        queueMicrotask(() => { isSyncingScrollRef.current = false; });
       },
     }),
     []

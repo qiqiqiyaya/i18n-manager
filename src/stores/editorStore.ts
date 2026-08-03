@@ -30,6 +30,7 @@ interface EditorState {
   updateTranslation: (lang: string, translations: TranslationObject) => void;
   applyLocaleSync: (addedKeys: string[], removedKeys: string[], renameMap?: Record<string, string>) => void;
   reconcileSchemaInLocales: (newSchema: SchemaObject) => void;
+  sortAllKeys: () => void;
   setIsDirty: (dirty: boolean) => void;
   setIsLoading: (loading: boolean) => void;
   setSaveStatus: (status: SaveStatus, error?: string | null) => void;
@@ -57,7 +58,16 @@ export const useEditorStore = create<EditorState>((set) => ({
   setAvailableLocales: (availableLocales) => set({ availableLocales }),
   setSchema: (schema) => set({ schema }),
   updateSchema: (schema) => set({ schema, isDirty: true, saveStatus: 'dirty' }),
-  setOpenLocales: (locales) => set({ openLocales: locales }),
+  setOpenLocales: (locales) =>
+    set((state) => {
+      // 对每个语言按 Schema 模板补回缺失的 key（值为空），与 openLocale 单语言逻辑一致
+      const template = emptyTranslationsFromSchema(state.schema);
+      const sanitizedLocales: Record<string, TranslationObject> = {};
+      for (const [lang, translations] of Object.entries(locales)) {
+        sanitizedLocales[lang] = deepMergeTemplate(translations, template);
+      }
+      return { openLocales: sanitizedLocales };
+    }),
 
   openLocale: (lang, translations) =>
     set((state) => {
@@ -185,6 +195,29 @@ export const useEditorStore = create<EditorState>((set) => ({
         }
       }
       return { openLocales: newOpenLocales };
+    }),
+
+  // 递归按 key 名排序对象（字典序），用于统一 Schema 和所有 locale 的 key 顺序
+  sortAllKeys: () =>
+    set((state) => {
+      const sortKeys = (obj: Record<string, any>): Record<string, any> => {
+        const result: Record<string, any> = {};
+        for (const key of Object.keys(obj).sort()) {
+          const value = obj[key];
+          if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+            result[key] = sortKeys(value);
+          } else {
+            result[key] = value;
+          }
+        }
+        return result;
+      };
+      const sortedSchema = sortKeys(state.schema);
+      const sortedLocales: Record<string, TranslationObject> = {};
+      for (const [lang, translations] of Object.entries(state.openLocales)) {
+        sortedLocales[lang] = sortKeys(translations);
+      }
+      return { schema: sortedSchema, openLocales: sortedLocales };
     }),
 
   setIsDirty: (isDirty) => set({ isDirty }),

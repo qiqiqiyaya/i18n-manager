@@ -9,8 +9,7 @@ export function flattenObject(
 ): Record<string, any> {
   const result: Record<string, any> = {};
 
-  // 按键名字典序排列以保证一致性
-  const keys = Object.keys(obj).sort();
+  const keys = Object.keys(obj);
 
   for (const key of keys) {
     const fullPath = prefix ? `${prefix}.${key}` : key;
