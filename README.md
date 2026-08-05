@@ -15,7 +15,7 @@
 ## 功能概览
 
 - **项目管理**：创建、编辑、删除、搜索项目
-- **双栏编辑器**：左栏 Schema（扁平键值对）+ 右栏译文（嵌套 JSON），均使用 Monaco Editor
+- **双栏编辑器**：左栏 Schema（嵌套 JSON）+ 右栏译文（嵌套 JSON），均使用 Monaco Editor
 - **多语言 Tab**：支持添加/切换/关闭语言 Tab，至少保留一个语言
 - **实时协作**：Socket.IO 房间隔离，键级锁定（30s 超时），在线人数显示
 - **自动保存**：RxJS 防抖 + 内容哈希去重 + Socket.IO 持久化
@@ -72,7 +72,7 @@ npm run start:server
 ```
 data/projects/{projectId}/
 ├── meta.json              # 项目元信息（id, title, description, createdAt, updatedAt）
-├── schema.json            # 键结构定义（Record<string, string>，扁平化）
+├── schema.json            # 键结构定义（Record<string, any>，嵌套 JSON 对象）
 └── locales/
     ├── zh-CN.json         # 各语言译文（嵌套 JSON）
     └── en-US.json
@@ -111,3 +111,4 @@ src/
 - [`docs/CODEMAPS/`](./docs/CODEMAPS/) — 架构、前端、后端、数据、依赖 codemap
 - [`docs/editor-large-data-optimization.md`](./docs/editor-large-data-optimization.md) — 编辑器大数据量优化（历史文档，已迁移至 Monaco Editor）
 - [`i18nManager.md`](./i18nManager.md) — 完整需求与技术约束
+- [`docs/PACKAGE.md`](./docs/PACKAGE.md) — 独立打包方案（便携版 Node.js + .bat 启动 + Windows Service）
