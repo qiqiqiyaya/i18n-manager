@@ -20,10 +20,9 @@ export async function POST(
     const languages = exportLanguagesSchema.parse(body.languages);
     const { files } = await getExportData(id, languages);
 
-    // 动态导入 archiver（ESM only）
-    const archiverModule = (await import('archiver')) as any;
-    const archiver = archiverModule.default || archiverModule;
-    const archive = archiver('zip', { zlib: { level: 9 } });
+    // archiver v7 是 ESM only，无 default export，需用命名导入 ZipArchive
+    const { ZipArchive } = (await import('archiver')) as typeof import('archiver');
+    const archive = new ZipArchive({ zlib: { level: 9 } });
 
     const chunks: Buffer[] = [];
     archive.on('data', (chunk: Buffer) => chunks.push(chunk));

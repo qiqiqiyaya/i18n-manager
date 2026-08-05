@@ -46,6 +46,9 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
   // 标记程序正在通过 setValue 写入 Monaco，此时 onChange 回调应忽略
   // Monaco 的 setValue 即使值不变也会触发 onDidChangeContent，需要此标志防止误判用户编辑
   const isProgrammaticChangeRef = useRef(false);
+  // 标记程序正在通过 syncEditorFromStore 写入 Monaco，此时 onDidChangeCursorPosition 回调应忽略
+  // 避免外部数据更新（如添加键）导致 setValue 重置光标时误触发翻译参考层弹出
+  const suppressCursorRef = useRef(false);
   // 用 ref 追踪最新 editorText，避免 blur handler 闭包过期
   const editorTextRef = useRef(editorText);
   editorTextRef.current = editorText;
@@ -86,6 +89,12 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
     isProgrammaticChangeRef.current = true;
     editorRef.current?.setValue(formatted);
     isProgrammaticChangeRef.current = false;
+
+    // 抑制 setValue 触发的 onDidChangeCursorPosition 事件，
+    // 防止外部数据更新（如 Schema 添加键 → applyLocaleSync →
+    // openLocales 变化）时意外弹出翻译参考层
+    suppressCursorRef.current = true;
+    queueMicrotask(() => { suppressCursorRef.current = false; });
 
     if (preservePosition && editor && position) {
       const model = editor.getModel();
@@ -307,6 +316,7 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
   }, []);
 
   const handleCursorPosition = useCallback(() => {
+    if (suppressCursorRef.current) return;
     const editor = editorRef.current?.getEditor();
     if (!editor || !activeLang) return;
 

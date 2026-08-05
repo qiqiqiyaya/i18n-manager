@@ -1,15 +1,18 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Subject } from 'rxjs';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import { Button, Input, Card, Modal, Form, message, Empty, Spin } from 'antd';
 import { PlusOutlined, SearchOutlined, EditOutlined, DeleteOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
+import SearchHighlight from '@/components/common/SearchHighlight';
 
 /** 搜索防抖延迟（毫秒） */
 const SEARCH_DEBOUNCE = 300;
+/** 后台静默刷新间隔（毫秒）：缓存未过期时可后台刷新，避免频繁全量请求 */
+const STALE_REFRESH_INTERVAL = 30_000;
 
 interface ProjectItem {
   id: string;
@@ -21,10 +24,10 @@ interface ProjectItem {
 
 export default function HomePage() {
   const router = useRouter();
-  const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [allProjects, setAllProjects] = useState<ProjectItem[]>([]); // 全量缓存
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState('');
-  const [searchKeyword, setSearchKeyword] = useState(''); // 防抖后的实际搜索词
+  const [debouncedKeyword, setDebouncedKeyword] = useState('');
   const searchSubjectRef = useRef<Subject<string> | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -40,7 +43,7 @@ export default function HomePage() {
       debounceTime(SEARCH_DEBOUNCE),
       distinctUntilChanged()
     ).subscribe((value) => {
-      setSearchKeyword(value);
+      setDebouncedKeyword(value);
     });
 
     return () => {
@@ -51,21 +54,44 @@ export default function HomePage() {
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    setKeyword(value); // 输入框立即响应
+    setKeyword(value);
     searchSubjectRef.current?.next(value);
   };
 
-  const loadProjects = useCallback(async () => {
-    setLoading(true);
+  // 首次加载 + 后台静默刷新全量列表
+  const loadAllProjects = useCallback(async () => {
     try {
-      const url = searchKeyword ? `/api/projects?keyword=${encodeURIComponent(searchKeyword)}` : '/api/projects';
-      const res = await axios.get(url);
-      setProjects(res.data.data.list || []);
+      const res = await axios.get('/api/projects');
+      setAllProjects(res.data.data.list || []);
     } catch { message.error('加载项目列表失败'); }
     finally { setLoading(false); }
-  }, [searchKeyword]);
+  }, []);
 
-  useEffect(() => { loadProjects(); }, [loadProjects]);
+  useEffect(() => { loadAllProjects(); }, [loadAllProjects]);
+
+  // 后台静默刷新：已有缓存时，每隔 STALE_REFRESH_INTERVAL 在后台拉取最新列表
+  // （不显示 loading 状态，静默替换缓存）
+  useEffect(() => {
+    if (loading || allProjects.length === 0) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await axios.get('/api/projects');
+        setAllProjects(res.data.data.list || []);
+      } catch { /* 静默失败，保留旧缓存 */ }
+    }, STALE_REFRESH_INTERVAL);
+    return () => clearInterval(interval);
+  }, [loading, allProjects.length]);
+
+  // 本地过滤（基于缓存，不再发 HTTP 搜索请求）
+  const filteredProjects = useMemo(() => {
+    if (!debouncedKeyword.trim()) return allProjects;
+    const lower = debouncedKeyword.toLowerCase();
+    return allProjects.filter(
+      (p) =>
+        p.title.toLowerCase().includes(lower) ||
+        (p.description && p.description.toLowerCase().includes(lower))
+    );
+  }, [allProjects, debouncedKeyword]);
 
   const handleCreate = async () => {
     try {
@@ -89,7 +115,7 @@ export default function HomePage() {
       setEditModalOpen(false);
       setEditingProject(null);
       form.resetFields();
-      loadProjects();
+      loadAllProjects();
     } catch (err: any) {
       if (err.response) message.error(err.response.data?.message || '更新失败');
     }
@@ -103,11 +129,13 @@ export default function HomePage() {
       okType: 'danger',
       cancelText: '取消',
       onOk: async () => {
-        try { await axios.delete(`/api/projects/${project.id}`); message.success('项目已删除'); loadProjects(); }
+        try { await axios.delete(`/api/projects/${project.id}`); message.success('项目已删除'); loadAllProjects(); }
         catch { message.error('删除失败'); }
       },
     });
   };
+
+  const showHighlight = !!debouncedKeyword.trim();
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '40px 24px' }}>
@@ -121,21 +149,25 @@ export default function HomePage() {
         onChange={handleSearchChange} allowClear style={{ marginBottom: 24, maxWidth: 400 }} />
       {loading ? (
         <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" /></div>
-      ) : projects.length === 0 ? (
+      ) : filteredProjects.length === 0 ? (
         <Empty description={keyword ? '未找到匹配的项目' : '暂无项目，点击"创建项目"开始'} />
       ) : (
         <div style={{ display: 'grid', gap: 16 }}>
-          {projects.map((project) => (
+          {filteredProjects.map((project) => (
             <Card key={project.id} hoverable onClick={() => router.push(`/projects/${project.id}`)}
               actions={[
                 <EditOutlined key="edit" onClick={(e) => { e.stopPropagation(); setEditingProject(project); form.setFieldsValue(project); setEditModalOpen(true); }} />,
                 <DeleteOutlined key="delete" onClick={(e) => { e.stopPropagation(); handleDelete(project); }} />,
               ]}>
               <Card.Meta avatar={<FolderOpenOutlined style={{ fontSize: 24, color: '#1677ff' }} />}
-                title={project.title}
+                title={showHighlight ? <SearchHighlight text={project.title} keyword={debouncedKeyword} /> : project.title}
                 description={
                   <div>
-                    <p style={{ margin: 0, color: '#666' }}>{project.description || '暂无描述'}</p>
+                    <p style={{ margin: 0, color: '#666' }}>
+                      {showHighlight && project.description
+                        ? <SearchHighlight text={project.description} keyword={debouncedKeyword} />
+                        : (project.description || '暂无描述')}
+                    </p>
                     <p style={{ margin: '8px 0 0', fontSize: 12, color: '#999' }}>
                       更新于 {new Date(project.updatedAt).toLocaleString('zh-CN')}
                     </p>
@@ -145,6 +177,7 @@ export default function HomePage() {
           ))}
         </div>
       )}
+      {/* 创建/编辑 Modal 保持不变 */}
       <Modal title="创建项目" open={createModalOpen} onOk={handleCreate}
         onCancel={() => setCreateModalOpen(false)} okText="创建" cancelText="取消">
         <Form form={form} layout="vertical">
