@@ -2,7 +2,7 @@
 
 # Frontend Architecture
 
-**Last Updated:** 2026-07-28
+**Last Updated:** 2026-08-05
 **Entry Points:** `src/app/page.tsx`, `src/app/projects/[id]/page.tsx`
 
 ## Pages (App Router)
@@ -19,7 +19,7 @@
 ### Home Page (`/`)
 ```
 HomePage (Client, axios + router + RxJS Subject for search)
-├── Search Input (debounced 300ms via RxJS debounceTime + distinctUntilChanged)
+├── Search Input (debounced 300ms via RxJS debounceTime + distinctUntilChanged; frontend cache + local filter + keyword highlight)
 ├── Project Cards (Ant Design Card + Meta, hoverable, click to navigate)
 │   └── Actions: EditOutlined, DeleteOutlined
 ├── Create Project Modal (Ant Design Form, title 1-50 chars, description max 200)
@@ -121,7 +121,7 @@ State:
 ```typescript
 {
   projectId: string | null;
-  schema: SchemaObject;              // { [flatKey]: description }
+  schema: SchemaObject;              // { nested key: description/object }
   openLocales: { [lang]: TranslationObject };  // nested JSON per language
   activeLang: string | null;
   isDirty: boolean;

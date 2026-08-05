@@ -2,7 +2,7 @@
 
 # Data Model & Persistence
 
-**Last Updated:** 2026-07-28
+**Last Updated:** 2026-08-05
 **Entry Points:** `src/lib/data-layer/index.ts`, `src/lib/utils.ts`
 
 ## File Structure (DATA_DIR)

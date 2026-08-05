@@ -2,7 +2,7 @@
 
 # Dependencies & External Integrations
 
-**Last Updated:** 2026-07-28
+**Last Updated:** 2026-08-05
 
 ## Runtime Dependencies (package.json)
 

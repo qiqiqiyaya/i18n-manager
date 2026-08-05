@@ -1,7 +1,7 @@
 # 多语言管理平台（i18n Manager）需求与技术设计文档
 
-> **版本**：2.1
-> **最后更新**：2026-08-01
+> **版本**：2.2
+> **最后更新**：2026-08-05
 > **状态**：核心功能已实现，文档与代码同步
 
 ---
@@ -129,7 +129,7 @@
 | 并发锁       | **proper-lockfile** | `4.1.2`   | 防止文件并发写冲突           |
 | 数据校验     | **zod**             | `4.4.0`+  | 验证 API 输入与文件结构      |
 | 日志         | **pino**            | `10.3.0`+ | 结构化日志，性能优秀         |
-| ZIP 打包     | **archiver**        | `8.0.0`+  | 导出 ZIP 文件打包            |
+| ZIP 打包     | **archiver**        | `8.0.0`+  | 导出 ZIP 文件打包（v7+ 为 ESM only，使用 `ZipArchive` 命名导入，无 default export） |
 | TypeScript 执行 | **tsx**          | `4.22.0`+ | 开发环境直接运行 TypeScript（`server.ts`） |
 
 ### 3.4 实时协作约定
@@ -167,7 +167,7 @@ project-root/
 └── src/
     ├── app/                      # Next.js App Router
     │   ├── layout.tsx            # 根布局（Geist 字体，zh-CN lang）
-    │   ├── page.tsx              # 首页：项目列表（Client Component，RxJS 搜索防抖）
+    │   ├── page.tsx              # 首页：项目列表（Client Component，全量缓存 + 本地过滤 + RxJS 搜索防抖 + 关键词高亮）
     │   ├── globals.css           # 全局样式（Tailwind 4）
     │   ├── projects/
     │   │   └── [id]/

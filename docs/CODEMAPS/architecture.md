@@ -2,7 +2,7 @@
 
 # i18n Manager Architecture
 
-**Last Updated:** 2026-07-28
+**Last Updated:** 2026-08-05
 **Entry Points:** `server.ts`, `src/app/page.tsx`, `src/app/projects/[id]/page.tsx`
 
 ## High-Level Overview
@@ -83,7 +83,7 @@
 - Schema conflict detection: timestamp-based rejection (`schema:rejected`)
 
 ### 3. Editor: Monaco Only
-- Left: Schema Editor (JSON flat key: description)
+- Left: Schema Editor (JSON nested key: description/object)
 - Right: Translation Editor (JSON nested)
 - Both use `@monaco-editor/react`
 - Import preview uses Monaco `DiffEditor`

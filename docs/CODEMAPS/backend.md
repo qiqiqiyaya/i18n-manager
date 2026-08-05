@@ -2,7 +2,7 @@
 
 # Backend Architecture
 
-**Last Updated:** 2026-07-28
+**Last Updated:** 2026-08-05
 **Entry Points:** `server.ts`, `src/lib/data-layer/index.ts`, `src/lib/socket-handler.ts`
 
 ## API Routes (Next.js App Router)

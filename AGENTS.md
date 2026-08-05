@@ -61,6 +61,8 @@ This file provides project-specific guidance for AI agents working on the i18n M
 1. **Do not use `npm run dev` for testing real-time collaboration** -- it only starts Next.js without Express/Socket.IO
 2. **Do not replace Monaco Editor** with any other editing component (Ant Design Table, Tree, etc.)
 3. **Do not use raw `setTimeout`/`clearTimeout`** for debounce/throttle -- use RxJS `Subject` + `pipe(debounceTime(...))`
-4. **Schema is flat** (`Record<string, string>`), but locale files are nested JSON; `flattenObject`/`unflattenObject` bridge the gap
+4. **Schema is nested** (`Record<string, any>`), matching the locale file structure; `flattenObject`/`unflattenObject` bridge the gap for flat-path operations (search, incremental transport, lock keyPath)
 5. **Socket.IO instance sharing** uses `globalThis` because Next.js re-bundles API route modules into separate scopes
 6. **`params` in App Router** is now `Promise<Record<string, string>>` in Next.js 16; must `await` before use
+7. **`archiver` v7+ is ESM-only**: imports via `{ ZipArchive }` (named export, no default); `createRequire` does not work for ESM-only packages
+8. **Homepage search**: frontend caches project list (`allProjects` state), filters locally via `useMemo` with 30s background refresh; search results highlight matched keywords via `SearchHighlight` component
