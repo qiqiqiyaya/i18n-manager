@@ -222,3 +222,132 @@ export function deepMergeTemplate(
   }
   return result;
 }
+
+/**
+ * 根据光标位置确定要插入键的目标嵌套路径
+ * 逐行扫描 JSON 文本，追踪大括号深度和当前键路径
+ * @param text - JSON 文本内容
+ * @param cursorLine - 光标所在行号（0-based）
+ * @returns 目标对象的嵌套路径（空数组表示根级别）
+ */
+export function determineInsertionPath(
+  text: string,
+  cursorLine: number
+): string[] {
+  const lines = text.split('\n');
+  const path: string[] = [];
+
+  for (let i = 0; i <= cursorLine && i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+
+    // 检查 "key": { 模式——打开新对象的键
+    const keyOpenMatch = trimmed.match(/"([^"]+)"\s*:\s*\{/);
+    const closes = (trimmed.match(/\}/g) || []).length;
+
+    if (i < cursorLine) {
+      // 光标前的行：正常追踪路径
+      if (keyOpenMatch) {
+        path.push(keyOpenMatch[1]);
+      }
+      // 处理闭合大括号（减去已由 keyOpenMatch 处理的 `{`）
+      for (let j = 0; j < closes - (keyOpenMatch ? 1 : 0); j++) {
+        if (path.length > 0) path.pop();
+      }
+    } else {
+      // 光标所在行：根据上下文决定插入位置
+
+      // 情况 1: 行有 "key": { → 插入到该对象内部
+      if (keyOpenMatch) {
+        path.push(keyOpenMatch[1]);
+        return path;
+      }
+
+      // 情况 2: 行有 }（闭合括号）→ 插入到被关闭的对象内部（path 即该对象）
+      if (closes > 0) {
+        return [...path];
+      }
+
+      // 情况 3: 行有 key-value 对 → 插入到当前层级
+      const keyMatch = trimmed.match(/"([^"]+)"\s*:/);
+      if (keyMatch) {
+        return [...path];
+      }
+
+      // 情况 4: 默认 → 插入到当前层级
+      return [...path];
+    }
+  }
+
+  return [];
+}
+
+/**
+ * 插入编辑描述：标记是在行首还是行尾插入
+ */
+export type InsertEditDescriptor = {
+  /** true = 在行首插入，false = 在行尾插入 */
+  insertAtStart: boolean;
+  /** 可选的精确列号（1-based），指定后忽略 insertAtStart */
+  column?: number;
+  /** 要插入的文本内容 */
+  text: string;
+};
+
+/**
+ * 根据光标所在行内容构建 Monaco 编辑操作描述
+ * @param cursorLine - 光标所在行的完整文本
+ * @param indent - 该行的缩进字符串
+ * @param key - 新生成的 key 名称
+ * @returns 编辑描述
+ */
+export function buildInsertEdit(
+  cursorLine: string,
+  indent: string,
+  key: string,
+  targetHasKeys: boolean = false
+): InsertEditDescriptor {
+  const trimmed = cursorLine.trim();
+
+  // 情况 0: 行包含空内联对象 `{}`（如 `"key": {},`）→ 在 { 和 } 之间插入
+  if (trimmed.match(/\{\s*\}/)) {
+    const bracePos = cursorLine.indexOf('{');
+    return {
+      insertAtStart: false,
+      column: bracePos + 2,
+      text: `\n${indent}  "${key}": ""`,
+    };
+  }
+
+  // 情况 1: 光标在 { 上 → 在 { 之后插入（缩进 +2）
+  // 如果目标对象已有 key，新 key 需要尾逗号
+  if (trimmed.endsWith('{') || trimmed === '{') {
+    const comma = targetHasKeys ? ',' : '';
+    return {
+      insertAtStart: false,
+      text: `\n${indent}  "${key}": ""${comma}`,
+    };
+  }
+
+  // 情况 2: 光标在 } 或 }, 上 → 在上一行行尾插入（加逗号 + 新行 + 新 key）
+  // key 缩进比 } 多 2，因为 key 在对象内部
+  if (trimmed === '}' || trimmed === '},') {
+    return {
+      insertAtStart: true,
+      text: `,\n${indent}  "${key}": ""`,
+    };
+  }
+
+  // 情况 3: 光标在逗号行 → 在行尾插入（带尾逗号，因为后面还有条目）
+  if (trimmed.endsWith(',')) {
+    return {
+      insertAtStart: false,
+      text: `\n${indent}"${key}": "",`,
+    };
+  }
+
+  // 情况 4: 默认（key-value 行）→ 行尾加逗号，插入新行
+  return {
+    insertAtStart: false,
+    text: `,\n${indent}"${key}": ""`,
+  };
+}

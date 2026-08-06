@@ -7,7 +7,7 @@ import { Button, Space, Tooltip } from 'antd';
 import { PlusOutlined, CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled, SyncOutlined, SortAscendingOutlined } from '@ant-design/icons';
 import { useEditorStore } from '@/stores/editorStore';
 import MonacoEditor, { type MonacoEditorHandle } from '@/components/json-editor/MonacoEditor';
-import { flattenObject, getLeafPaths } from '@/lib/utils';
+import { flattenObject, getLeafPaths, determineInsertionPath, buildInsertEdit } from '@/lib/utils';
 import type { SchemaUpdatedPayload } from '@/types/collaboration';
 import type { SchemaObject } from '@/types/schema';
 import type { editor } from 'monaco-editor';
@@ -341,178 +341,132 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
     });
   }, [handleBlur]);
 
-  // ---------- 获取 monaco 实例引用（用于 executeEdits） ----------
-  const getMonaco = useCallback(() => {
-    try {
-      return (window as { monaco?: unknown }).monaco as typeof import('monaco-editor');
-    } catch {
-      return null;
-    }
-  }, []);
-
-  // ---------- 辅助：从光标位置推断父路径和插入位置 ----------
-  const inferInsertContext = useCallback((model: editor.ITextModel, lineNumber: number) => {
-    const getLine = (ln: number) => model.getLineContent(ln);
-    const getIndent = (ln: number) => (getLine(ln).match(/^\s*/)?.[0] || '');
-    const getKey = (line: string) => line.trim().match(/^"([^"]+)"\s*:/)?.[1] || '';
-
-    // 空行 → 向上搜索最近的键行
-    let targetLine = lineNumber;
-    let trimmed = getLine(targetLine).trim();
-    while (!trimmed && targetLine > 1) {
-      targetLine--;
-      trimmed = getLine(targetLine).trim();
-    }
-
-    const baseIndent = getIndent(targetLine);
-    const line = getLine(targetLine);
-    const parentChain = (ln: number): string => {
-      const path: string[] = [];
-      const currentIndent = getIndent(ln).length;
-      let searchIndent = currentIndent;
-      for (let i = ln - 1; i >= 1; i--) {
-        const l = getLine(i);
-        const t = l.trim();
-        if (!t) continue;
-        const ind = (l.match(/^\s*/)?.[0] || '').length;
-        if (ind < searchIndent && /^"[^"]+":\s*\{$/.test(t)) {
-          path.unshift(getKey(l));
-          searchIndent = ind;
-        }
-      }
-      return path.join('.');
-    };
-
-    // "key": { → 在对象内插入
-    if (/^"[^"]+":\s*\{$/.test(trimmed)) {
-      const currentKey = getKey(line);
-      const parentPath = parentChain(targetLine);
-      const fullPath = parentPath ? `${parentPath}.${currentKey}` : currentKey;
-      return { parentPath: fullPath, insertLine: targetLine + 1, indent: baseIndent + '  ' };
-    }
-
-    // "key": {}, → 替换为多行
-    if (/^"[^"]+":\s*\{\}\s*,?\s*$/.test(trimmed)) {
-      const currentKey = getKey(line);
-      const parentPath = parentChain(targetLine);
-      const fullPath = parentPath ? `${parentPath}.${currentKey}` : currentKey;
-      return { parentPath: fullPath, insertLine: targetLine, indent: baseIndent + '  ' };
-    }
-
-    // } → 在前一行插入
-    if (trimmed.startsWith('}')) {
-      const parentIndent = baseIndent.length >= 2 ? baseIndent.slice(0, -2) : '';
-      return { parentPath: '', insertLine: targetLine, indent: parentIndent };
-    }
-
-    // 默认：键值行 → 在下一行插入
-    const pp = parentChain(targetLine);
-    return { parentPath: pp, insertLine: targetLine + 1, indent: baseIndent };
-  }, []);
-
-  // ---------- 快速添加键（光标位置感知） ----------
+  // ---------- 快速添加键（辅助功能，光标感知） ----------
   const handleAddKey = useCallback(() => {
+    // 获取光标位置
     const editor = editorRef.current?.getEditor();
     if (!editor) return;
     const position = editor.getPosition();
     if (!position) return;
-    const model = editor.getModel();
-    if (!model) return;
-    const monaco = getMonaco();
-    if (!monaco) return;
 
-    // 1. 推断父路径和插入位置
-    const { parentPath, insertLine, indent } = inferInsertContext(model, position.lineNumber);
+    const text = editorTextRef.current;
+    const lines = text.split('\n');
+    const cursorLineIdx = position.lineNumber - 1;
+    const cursorLine = lines[cursorLineIdx];
+    if (!cursorLine) return;
 
-    // 2. 生成唯一键名
+    // 确定插入路径（用于 store 同步）
+    const path = determineInsertionPath(text, cursorLineIdx);
+
+    // 从编辑器当前 JSON 文本解析嵌套结构
+    let currentNested: SchemaObject;
+    try {
+      currentNested = JSON.parse(text) as SchemaObject;
+    } catch {
+      // JSON 解析失败时中止操作，防止清空编辑器
+      return;
+    }
+    if (!currentNested || typeof currentNested !== 'object' || Array.isArray(currentNested)) {
+      return;
+    }
+
+    // 导航到目标对象，生成唯一 key 名
+    let target = currentNested;
+    for (const segment of path) {
+      if (!target || typeof target !== 'object' || Array.isArray(target)) {
+        return;
+      }
+      target = target[segment] as Record<string, unknown>;
+      if (!target || typeof target !== 'object' || Array.isArray(target)) {
+        return;
+      }
+    }
+
+    const existingKeys = Object.keys(target);
+    const targetHasKeys = existingKeys.length > 0;
     const baseKey = 'new_key';
-    const flatSchema = flattenObject(schema);
     let key = baseKey;
     let counter = 1;
-    const fullKey = parentPath ? `${parentPath}.${key}` : key;
-    while (fullKey in flatSchema) {
+    while (existingKeys.includes(key)) {
       key = `${baseKey}_${counter}`;
       counter++;
     }
 
-    // 3. 用 Monaco 文本操作插入新键
-    const newKeyStr = `${indent}"${key}": ""`;
-    const closeIndent = indent.length >= 2 ? indent.slice(0, -2) : '';
+    // 根据光标上下文决定插入位置和文本
+    const currentIndent = cursorLine.match(/^\s*/)?.[0] || '';
 
-    const lineContent = model.getLineContent(position.lineNumber);
-    const trimmed = lineContent.trim();
-    const isEmptyObj = /^"[^"]+":\s*\{\}\s*,?\s*$/.test(trimmed);
-
-    if (isEmptyObj) {
-      // 替换 "key": {} 为多行（保留原始逗号）
-      const currentKey = trimmed.match(/^"([^"]+)"/)?.[1] || '';
-      const hasTrailingComma = /,\s*$/.test(trimmed);
-      const closing = hasTrailingComma ? `${closeIndent}},` : `${closeIndent}}`;
-      const range = new monaco.Range(insertLine, 1, insertLine, model.getLineLength(insertLine) + 1);
-      editor.executeEdits('add-key', [{
-        range,
-        text: `  "${currentKey}": {\n${newKeyStr}\n${closing}`,
-        forceMoveMarkers: true,
-      }]);
-    } else {
-      // 在指定行插入新键行
-      // 检查上一行是否缺少逗号（原为最后一个属性，插入后需要逗号）
-      const edits: { range: import('monaco-editor').IRange; text: string; forceMoveMarkers: boolean }[] = [];
-      const prevLine = model.getLineContent(insertLine - 1).trim();
-      if (prevLine && !prevLine.endsWith(',') && !prevLine.endsWith('{') && prevLine !== '{') {
-        // 上一行是最后一个属性（无逗号），在其行尾加逗号
-        const prevLineLen = model.getLineContent(insertLine - 1).length;
-        edits.push({
-          range: new monaco.Range(insertLine - 1, prevLineLen + 1, insertLine - 1, prevLineLen + 1),
-          text: ',',
-          forceMoveMarkers: true,
-        });
+    // 使用纯函数构建编辑操作（传入 targetHasKeys 以决定是否需要尾逗号）
+    const editDesc = buildInsertEdit(cursorLine, currentIndent, key, targetHasKeys);
+    let targetLineNumber: number;
+    let targetColumn: number;
+    if (editDesc.column != null) {
+      targetLineNumber = position.lineNumber;
+      targetColumn = editDesc.column;
+    } else if (editDesc.insertAtStart) {
+      // 插入到上一行行尾（用于 } 情况：在上一行加逗号 + 新 key）
+      const prevLineIdx = position.lineNumber - 2;
+      if (prevLineIdx >= 0 && prevLineIdx < lines.length) {
+        targetLineNumber = position.lineNumber - 1;
+        targetColumn = lines[prevLineIdx].length + 1;
+      } else {
+        targetLineNumber = position.lineNumber;
+        targetColumn = 1;
       }
-      edits.push({
-        range: new monaco.Range(insertLine, 1, insertLine, 1),
-        text: `${newKeyStr},\n`,
-        forceMoveMarkers: true,
-      });
-      editor.executeEdits('add-key', edits);
+    } else {
+      targetLineNumber = position.lineNumber;
+      targetColumn = cursorLine.length + 1;
     }
+    const edit = {
+      range: {
+        startLineNumber: targetLineNumber,
+        startColumn: targetColumn,
+        endLineNumber: targetLineNumber,
+        endColumn: targetColumn,
+      },
+      text: editDesc.text,
+    };
 
-    // 4. 解析新文本并执行保存逻辑
-    const newText = editor.getValue();
-    let currentNested: SchemaObject;
-    try {
-      currentNested = JSON.parse(newText) as SchemaObject;
-    } catch {
-      return;
-    }
-    if (!currentNested || typeof currentNested !== 'object' || Array.isArray(currentNested)) return;
+    // 执行 Monaco 文本编辑（光标自然停留在插入点）
+    isProgrammaticChangeRef.current = true;
+    editor.executeEdits('add-key', [edit]);
+    editor.focus();
+    isProgrammaticChangeRef.current = false;
 
-    const formatted = JSON.stringify(currentNested, null, 2);
-    setEditorText(formatted);
-    lastSyncedRef.current = formatted;
+    // 读取编辑后的完整文本
+    const updatedText = editor.getValue();
+    setEditorText(updatedText);
+    lastSyncedRef.current = updatedText;
     setValidationStatus('valid');
     setValidationMessage(null);
-    isProgrammaticChangeRef.current = true;
-    editorRef.current?.setValue(formatted);
-    isProgrammaticChangeRef.current = false;
 
     // 标记为自身操作，阻止 useEffect 回写
     isSelfOriginatedChangeRef.current = true;
     setTimeout(() => { isSelfOriginatedChangeRef.current = false; }, 0);
 
-    updateSchema(currentNested);
-
-    // 扁平化键路径用于 locale 同步
-    const newFlatKeys = getLeafPaths(currentNested);
-    const newKeys = newFlatKeys.filter((k) => !(k in flatSchema));
-
-    if (newKeys.length > 0) {
-      applyLocaleSync(newKeys, []);
+    // 解析更新后的 JSON 用于 store/network 同步
+    let updatedNested: SchemaObject;
+    try {
+      updatedNested = JSON.parse(updatedText) as SchemaObject;
+    } catch {
+      updatedNested = currentNested;
     }
 
+    updateSchema(updatedNested);
+
+    // 触发防抖解析管道（自动保存等）
+    parseSubjectRef.current?.next(updatedText);
+
+    // 扁平化键路径用于 locale 同步
+    const flatSchema = flattenObject(schema);
+    const newFlatKeys = getLeafPaths(updatedNested);
+    const newKeys = newFlatKeys.filter((k) => !(k in flatSchema));
+
+    applyLocaleSync(newKeys, []);
+
     // 广播 Schema 变更
-    if (sendSchemaUpdated && newKeys.length > 0) {
+    if (sendSchemaUpdated) {
       sendSchemaUpdated({
-        schema: currentNested,
+        schema: updatedNested,
         addedKeys: newKeys,
         removedKeys: [],
         timestamp: Date.now(),
@@ -523,12 +477,12 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
     // 通过 Socket.IO 持久化到磁盘
     if (sendSchemaSave) {
       sendSchemaSave({
-        schema: currentNested,
+        schema: updatedNested,
         addedKeys: newKeys,
         removedKeys: [],
       });
     }
-  }, [schema, updateSchema, applyLocaleSync, sendSchemaUpdated, sendSchemaSave, socketId, getMonaco, inferInsertContext]);
+  }, [schema, updateSchema, applyLocaleSync, sendSchemaUpdated, sendSchemaSave, socketId]);
 
   // ---------- 格式化文档 ----------
   const handleFormat = useCallback(() => {
