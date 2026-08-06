@@ -341,29 +341,135 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
     });
   }, [handleBlur]);
 
-  // ---------- 快速添加键（辅助功能） ----------
+  // ---------- 获取 monaco 实例引用（用于 executeEdits） ----------
+  const getMonaco = useCallback(() => {
+    try {
+      return (window as { monaco?: unknown }).monaco as typeof import('monaco-editor');
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // ---------- 辅助：从光标位置推断父路径和插入位置 ----------
+  const inferInsertContext = useCallback((model: editor.ITextModel, lineNumber: number) => {
+    const getLine = (ln: number) => model.getLineContent(ln);
+    const getIndent = (ln: number) => (getLine(ln).match(/^\s*/)?.[0] || '');
+    const getKey = (line: string) => line.trim().match(/^"([^"]+)"\s*:/)?.[1] || '';
+
+    // 空行 → 向上搜索最近的键行
+    let targetLine = lineNumber;
+    let trimmed = getLine(targetLine).trim();
+    while (!trimmed && targetLine > 1) {
+      targetLine--;
+      trimmed = getLine(targetLine).trim();
+    }
+
+    const baseIndent = getIndent(targetLine);
+    const line = getLine(targetLine);
+    const parentChain = (ln: number): string => {
+      const path: string[] = [];
+      const currentIndent = getIndent(ln).length;
+      let searchIndent = currentIndent;
+      for (let i = ln - 1; i >= 1; i--) {
+        const l = getLine(i);
+        const t = l.trim();
+        if (!t) continue;
+        const ind = (l.match(/^\s*/)?.[0] || '').length;
+        if (ind < searchIndent && /^"[^"]+":\s*\{$/.test(t)) {
+          path.unshift(getKey(l));
+          searchIndent = ind;
+        }
+      }
+      return path.join('.');
+    };
+
+    // "key": { → 在对象内插入
+    if (/^"[^"]+":\s*\{$/.test(trimmed)) {
+      const currentKey = getKey(line);
+      const parentPath = parentChain(targetLine);
+      const fullPath = parentPath ? `${parentPath}.${currentKey}` : currentKey;
+      return { parentPath: fullPath, insertLine: targetLine + 1, indent: baseIndent + '  ' };
+    }
+
+    // "key": {}, → 替换为多行
+    if (/^"[^"]+":\s*\{\}\s*,?\s*$/.test(trimmed)) {
+      const currentKey = getKey(line);
+      const parentPath = parentChain(targetLine);
+      const fullPath = parentPath ? `${parentPath}.${currentKey}` : currentKey;
+      return { parentPath: fullPath, insertLine: targetLine, indent: baseIndent + '  ' };
+    }
+
+    // } → 在前一行插入
+    if (trimmed.startsWith('}')) {
+      const parentIndent = baseIndent.length >= 2 ? baseIndent.slice(0, -2) : '';
+      return { parentPath: '', insertLine: targetLine, indent: parentIndent };
+    }
+
+    // 默认：键值行 → 在下一行插入
+    const pp = parentChain(targetLine);
+    return { parentPath: pp, insertLine: targetLine + 1, indent: baseIndent };
+  }, []);
+
+  // ---------- 快速添加键（光标位置感知） ----------
   const handleAddKey = useCallback(() => {
+    const editor = editorRef.current?.getEditor();
+    if (!editor) return;
+    const position = editor.getPosition();
+    if (!position) return;
+    const model = editor.getModel();
+    if (!model) return;
+    const monaco = getMonaco();
+    if (!monaco) return;
+
+    // 1. 推断父路径和插入位置
+    const { parentPath, insertLine, indent } = inferInsertContext(model, position.lineNumber);
+
+    // 2. 生成唯一键名
     const baseKey = 'new_key';
-    // 检查扁平化 schema 中是否已存在该键
     const flatSchema = flattenObject(schema);
     let key = baseKey;
     let counter = 1;
-    while (key in flatSchema) {
+    const fullKey = parentPath ? `${parentPath}.${key}` : key;
+    while (fullKey in flatSchema) {
       key = `${baseKey}_${counter}`;
       counter++;
     }
 
-    // 从编辑器当前 JSON 文本解析嵌套结构，添加新键到根级别
+    // 3. 用 Monaco 文本操作插入新键
+    const newKeyStr = `${indent}"${key}": ""`;
+    const closeIndent = indent.length >= 2 ? indent.slice(0, -2) : '';
+
+    const trimmed = model.getLineContent(position.lineNumber).trim();
+    const isEmptyObj = /^"[^"]+":\s*\{\}\s*,?\s*$/.test(trimmed);
+
+    if (isEmptyObj) {
+      // 替换 "key": {} 为多行
+      const currentKey = trimmed.match(/^"([^"]+)"/)?.[1] || '';
+      const range = new monaco.Range(insertLine, 1, insertLine, model.getLineLength(insertLine) + 1);
+      editor.executeEdits('add-key', [{
+        range,
+        text: `  "${currentKey}": {\n${newKeyStr}\n${closeIndent}}`,
+        forceMoveMarkers: true,
+      }]);
+    } else {
+      // 在指定行插入新键行
+      const range = new monaco.Range(insertLine, 1, insertLine, 1);
+      editor.executeEdits('add-key', [{
+        range,
+        text: `${newKeyStr},\n`,
+        forceMoveMarkers: true,
+      }]);
+    }
+
+    // 4. 解析新文本并执行保存逻辑
+    const newText = editor.getValue();
     let currentNested: SchemaObject;
     try {
-      currentNested = JSON.parse(editorTextRef.current) as SchemaObject;
+      currentNested = JSON.parse(newText) as SchemaObject;
     } catch {
-      currentNested = {};
+      return;
     }
-    if (!currentNested || typeof currentNested !== 'object' || Array.isArray(currentNested)) {
-      currentNested = {};
-    }
-    currentNested[key] = '';
+    if (!currentNested || typeof currentNested !== 'object' || Array.isArray(currentNested)) return;
 
     const formatted = JSON.stringify(currentNested, null, 2);
     setEditorText(formatted);
@@ -384,10 +490,12 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
     const newFlatKeys = getLeafPaths(currentNested);
     const newKeys = newFlatKeys.filter((k) => !(k in flatSchema));
 
-    applyLocaleSync(newKeys, []);
+    if (newKeys.length > 0) {
+      applyLocaleSync(newKeys, []);
+    }
 
     // 广播 Schema 变更
-    if (sendSchemaUpdated) {
+    if (sendSchemaUpdated && newKeys.length > 0) {
       sendSchemaUpdated({
         schema: currentNested,
         addedKeys: newKeys,
@@ -405,7 +513,7 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
         removedKeys: [],
       });
     }
-  }, [schema, updateSchema, applyLocaleSync, sendSchemaUpdated, sendSchemaSave, socketId]);
+  }, [schema, updateSchema, applyLocaleSync, sendSchemaUpdated, sendSchemaSave, socketId, getMonaco, inferInsertContext]);
 
   // ---------- 格式化文档 ----------
   const handleFormat = useCallback(() => {
