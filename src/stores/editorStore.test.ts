@@ -198,12 +198,12 @@ describe('editorStore', () => {
       expect(locales['en-US']).toEqual({ b: 'val2', c: '' });
     });
 
-    it('handles locale with array values (flatten throws, locale skipped)', () => {
+    it('handles locale with array values (flatten passes through)', () => {
       useEditorStore.getState().setSchema({});
       useEditorStore.getState().setOpenLocales({ 'zh-CN': { list: [1, 2, 3] } });
       useEditorStore.getState().applyLocaleSync(['c'], []);
-      // flatten throws on arrays, so the locale is preserved as-is (c not added)
-      expect(useEditorStore.getState().openLocales['zh-CN']).toEqual({ list: [1, 2, 3] });
+      // flatten now passes arrays through, so locale is processed and c added
+      expect(useEditorStore.getState().openLocales['zh-CN']).toEqual({ list: [1, 2, 3], c: '' });
     });
   });
 
@@ -216,12 +216,13 @@ describe('editorStore', () => {
       expect(useEditorStore.getState().openLocales['zh-CN']).toEqual({ a: '值1', d: '' });
     });
 
-    it('handles locale with array values (flatten throws)', () => {
+    it('handles locale with array values (flatten passes through)', () => {
       useEditorStore.getState().setSchema({});
       useEditorStore.getState().setOpenLocales({ 'zh-CN': { list: [1, 2, 3] } });
       const newSchema = { b: 'desc' };
       useEditorStore.getState().reconcileSchemaInLocales(newSchema);
-      expect(useEditorStore.getState().openLocales['zh-CN']).toEqual({ list: [1, 2, 3] });
+      // flatten passes arrays through; array key not in new schema is removed
+      expect(useEditorStore.getState().openLocales['zh-CN']).toEqual({ b: '' });
     });
   });
 

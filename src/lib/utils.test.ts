@@ -40,9 +40,14 @@ describe('flattenObject', () => {
     expect(flattenObject({})).toEqual({});
   });
 
-  it('throws on array values', () => {
+  it('preserves array values as-is', () => {
     const input = { list: [1, 2, 3] };
-    expect(() => flattenObject(input)).toThrow('不支持数组类型');
+    expect(flattenObject(input)).toEqual({ list: [1, 2, 3] });
+  });
+
+  it('preserves nested array values', () => {
+    const input = { settings: { items: ['a', 'b'] } };
+    expect(flattenObject(input)).toEqual({ 'settings.items': ['a', 'b'] });
   });
 
   it('handles null values', () => {

@@ -1,7 +1,7 @@
 /**
  * 将嵌套对象扁平化为点分隔的单层对象
  * 如 { emp: { name: "姓名" } } → { "emp.name": "姓名" }
- * 不支持数组，遇到数组将抛出错误
+ * 数组值会原样保留（不展开，不报错）
  */
 export function flattenObject(
   obj: Record<string, any>,
@@ -25,7 +25,7 @@ export function flattenObject(
         Object.assign(result, nested);
       }
     } else if (Array.isArray(value)) {
-      throw new Error(`不支持数组类型: ${fullPath}`);
+      result[fullPath] = value;
     } else {
       result[fullPath] = value;
     }
