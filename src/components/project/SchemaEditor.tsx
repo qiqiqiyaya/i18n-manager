@@ -439,26 +439,41 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
     const newKeyStr = `${indent}"${key}": ""`;
     const closeIndent = indent.length >= 2 ? indent.slice(0, -2) : '';
 
-    const trimmed = model.getLineContent(position.lineNumber).trim();
+    const lineContent = model.getLineContent(position.lineNumber);
+    const trimmed = lineContent.trim();
     const isEmptyObj = /^"[^"]+":\s*\{\}\s*,?\s*$/.test(trimmed);
 
     if (isEmptyObj) {
-      // 替换 "key": {} 为多行
+      // 替换 "key": {} 为多行（保留原始逗号）
       const currentKey = trimmed.match(/^"([^"]+)"/)?.[1] || '';
+      const hasTrailingComma = /,\s*$/.test(trimmed);
+      const closing = hasTrailingComma ? `${closeIndent}},` : `${closeIndent}}`;
       const range = new monaco.Range(insertLine, 1, insertLine, model.getLineLength(insertLine) + 1);
       editor.executeEdits('add-key', [{
         range,
-        text: `  "${currentKey}": {\n${newKeyStr}\n${closeIndent}}`,
+        text: `  "${currentKey}": {\n${newKeyStr}\n${closing}`,
         forceMoveMarkers: true,
       }]);
     } else {
       // 在指定行插入新键行
-      const range = new monaco.Range(insertLine, 1, insertLine, 1);
-      editor.executeEdits('add-key', [{
-        range,
+      // 检查上一行是否缺少逗号（原为最后一个属性，插入后需要逗号）
+      const edits: { range: import('monaco-editor').IRange; text: string; forceMoveMarkers: boolean }[] = [];
+      const prevLine = model.getLineContent(insertLine - 1).trim();
+      if (prevLine && !prevLine.endsWith(',') && !prevLine.endsWith('{') && prevLine !== '{') {
+        // 上一行是最后一个属性（无逗号），在其行尾加逗号
+        const prevLineLen = model.getLineContent(insertLine - 1).length;
+        edits.push({
+          range: new monaco.Range(insertLine - 1, prevLineLen + 1, insertLine - 1, prevLineLen + 1),
+          text: ',',
+          forceMoveMarkers: true,
+        });
+      }
+      edits.push({
+        range: new monaco.Range(insertLine, 1, insertLine, 1),
         text: `${newKeyStr},\n`,
         forceMoveMarkers: true,
-      }]);
+      });
+      editor.executeEdits('add-key', edits);
     }
 
     // 4. 解析新文本并执行保存逻辑
