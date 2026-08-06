@@ -176,10 +176,14 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
         const parsed = JSON.parse(rawText);
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
           const cleanHash = JSON.stringify(parsed);
+          // 内容无变化时跳过
           if (cleanHash === lastSyncedRef.current) {
             setValidationError(null);
             return;
           }
+
+          // 标记编辑完成，防止 store 更新触发虚假的 Schema 更新警告
+          isEditingRef.current = false;
 
           updateTranslation(activeLang, parsed);
           lastSyncedRef.current = cleanHash;
