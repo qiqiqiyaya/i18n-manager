@@ -167,6 +167,7 @@ project-root/
 
 ## 重要设计约束
 
+0. **Ant Design 组件开发**：编写涉及 Ant Design 组件的代码前，阅读 https://ant.design/llms.txt 并理解组件库 API，在编写 Ant Design 代码时使用这些知识。该文档包含全部 74 个组件的完整 API、版本变更和弃用标记（例如 Modal/Drawer 的 `maskClosable` 已弃用，应使用 `mask={{ closable: false }}`，自 6.3.0 起）
 1. **编辑器必须使用 `@monaco-editor/react`**，不得用 Ant Design Table/Tree 或旧版 jsoneditor 替代
 2. **键级锁定**通过 Monaco Editor 的 `onDidChangeCursorPosition` 回调 + WebSocket 消息实现，不得使用 `setReadOnly(true)` 全局只读
 3. **原子写入**：先写临时文件再 `fs.move` 替换，通过 `proper-lockfile` 互斥锁保护（重试 5 次，50-200ms 间隔）

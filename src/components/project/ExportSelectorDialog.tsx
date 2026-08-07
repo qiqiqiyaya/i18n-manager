@@ -42,7 +42,7 @@ export default function ExportSelectorDialog({ projectId, open, onClose }: Expor
   const indeterminate = selected.length > 0 && selected.length < locales.length;
 
   return (
-    <Modal title="导出翻译文件" open={open} onCancel={onClose} footer={null}>
+    <Modal title="导出翻译文件" open={open} onCancel={onClose} footer={null} mask={{ closable: false }}>
       <div style={{ marginBottom: 16 }}>
         <Checkbox indeterminate={indeterminate} checked={allSelected}
           onChange={() => setSelected(allSelected ? [] : [...locales])}>全选</Checkbox>

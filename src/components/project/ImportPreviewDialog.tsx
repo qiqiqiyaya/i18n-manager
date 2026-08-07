@@ -91,7 +91,7 @@ export default function ImportPreviewDialog({
   const diffData = buildDiffJson();
 
   return (
-    <Modal title="导入翻译文件" open={open} onCancel={() => { onClose(); reset(); }} footer={null} width={720}>
+    <Modal title="导入翻译文件" open={open} onCancel={() => { onClose(); reset(); }} footer={null} width={720} mask={{ closable: false }}>
       {!preview ? (
         <Dragger accept=".json" beforeUpload={handleFile} showUploadList={false}>
           <p className="ant-upload-drag-icon"><InboxOutlined /></p>

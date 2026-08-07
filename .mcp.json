@@ -43,6 +43,16 @@
                 "chrome"
             ],
             "description": "浏览器自动化与 E2E 测试"
+        },
+        "firecrawl": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "firecrawl-mcp"
+            ],
+            "env": {
+                "FIRECRAWL_API_KEY": "fc-test"
+            }
         }
     }
 }
