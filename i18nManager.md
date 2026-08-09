@@ -1,8 +1,14 @@
 # 多语言管理平台（i18n Manager）需求与技术设计文档
 
-> **版本**：2.2
-> **最后更新**：2026-08-05
+> **版本**：2.3
+> **最后更新**：2026-08-09
 > **状态**：核心功能已实现，文档与代码同步
+> 
+> **重要更新**：
+> - 键级锁定功能已于 2026-08-09 移除（客户端从未接线的死代码）
+> - 并发保护由 Schema 时间戳冲突检测 + proper-lockfile 原子写入承担
+> - 数组支持已修复：`flattenObject` 遇到数组时保留原样，不再抛错
+> - 添加了测试栈相关信息
 
 ---
 
@@ -78,17 +84,15 @@
 
 #### 2.3.1 实时编辑感知
 - 系统应实时显示当前编辑同一项目的在线人数（仅数字）。
-- 当用户正在编辑某个键的译文时，其他在线用户应能看到该键处于"被编辑"状态（如只读提示）。
 
 #### 2.3.2 冲突处理策略
 - **采用乐观锁（后发覆盖）策略**：不阻塞用户编辑，任何修改均可保存。若发生覆盖（同一键被两人同时修改），后到达的修改覆盖先到达的（根据时间戳对比）。
 - 被覆盖的用户界面应收到"该键已被他人更新"的**无感提示**（2～3秒自动消失），不阻塞用户操作。
 - Schema 变更采用**时间戳冲突检测**：客户端发送变更时携带时间戳，服务端比对拒绝过期变更（`schema:rejected`），客户端收到后自动同步到最新已接受的数据。
 
-#### 2.3.3 防冲突锁定（视觉提示，不阻塞编辑）
-- 当用户聚焦某个键时，该键应被标记为"正在被编辑"状态（如颜色高亮或锁图标），提示其他用户。
-- 但**不禁止**其他用户编辑该键，仅作通知用途，最终以时间戳后发覆盖为准。
-- 若用户长时间（如 30 秒）无操作，标记应自动释放，避免误导他人。
+#### 2.3.3 并发与一致性保障
+- **原子写入**：所有文件写入通过 `proper-lockfile` 实现互斥锁，先写临时文件再替换，确保断电或并发安全。
+- **Schema 时间戳冲突检测**：服务端维护模块级时间戳，过期变更被拒绝并返回最新已接受数据。
 
 ---
 
@@ -124,7 +128,7 @@
 | ------------ | ------------------- | --------- | ---------------------------- |
 | 运行时       | **Node.js**         | `22 LTS`  | 提供稳定的异步 I/O           |
 | 自定义服务器 | **Express**         | `5.2.0`+  | 包装 Next.js，挂载 Socket.IO |
-| 实时通信     | **Socket.IO**       | `4.8.0`+  | 房间广播、心跳、锁超时控制   |
+| 实时通信     | **Socket.IO**       | `4.8.0`+  | 房间广播、心跳、实时协作   |
 | 文件操作     | **fs-extra**        | `11.3.0`+ | 原子写入 `outputJson` 等     |
 | 并发锁       | **proper-lockfile** | `4.1.2`   | 防止文件并发写冲突           |
 | 数据校验     | **zod**             | `4.4.0`+  | 验证 API 输入与文件结构      |
@@ -135,7 +139,6 @@
 ### 3.4 实时协作约定
 - **房间隔离**：客户端连接时在 `query` 中携带 `projectId`，服务端自动加入 `room:project-{projectId}`。
 - **消息类型**：
-  - `lock` / `unlock`：键级锁定标记，含 `keyPath`, `language`, `ip`，超时 30 秒自动释放（仅用于视觉提示，不强制只读）。
   - `update`：主表或译文变更后广播（除发送者）。
   - `overwritten`：服务端通知被覆盖者。
   - `online_count`：房间人数广播。
@@ -195,28 +198,26 @@ project-root/
     │
     ├── components/               # 共享 UI 组件
     │   ├── json-editor/
-    │   │   ├── MonacoEditor.tsx   # @monaco-editor/react 封装（forwardRef + memo）
-    │   │   └── JsonEditor.tsx     # 旧版 jsoneditor 封装（已弃用，保留未删除）
+    │   │   └── MonacoEditor.tsx   # @monaco-editor/react 封装（forwardRef + memo）
     │   ├── project/
     │   │   ├── SchemaEditor.tsx       # 左栏 Schema 编辑器（RxJS 防抖解析 + 重命名检测 + Socket.IO 保存）
-    │   │   ├── LocaleEditor.tsx       # 右栏译文编辑器（RxJS 防抖 + 翻译参考浮层 + 锁定提示）
+    │   │   ├── LocaleEditor.tsx       # 右栏译文编辑器（RxJS 防抖 + 翻译参考浮层）
     │   │   ├── LanguageTabs.tsx       # 语言 Tab 栏（Ant Design Tabs + Dropdown 添加语言）
     │   │   ├── ImportPreviewDialog.tsx # 导入预览对话框（Monaco DiffEditor 差异对比）
     │   │   └── ExportSelectorDialog.tsx # 导出选择对话框（Checkbox + file-saver ZIP 下载）
     │   ├── collaboration/
-    │   │   ├── OnlineBadge.tsx       # 在线人数徽标（Ant Design Badge + TeamOutlined）
-    │   │   └── LockIndicator.tsx     # 锁定指示器（Tag + LockOutlined，读取 collaborationStore）
+    │   │   └── OnlineBadge.tsx       # 在线人数徽标（Ant Design Badge + TeamOutlined）
     │   └── common/
     │       └── SearchHighlight.tsx   # 搜索高亮组件（正则分割 + <mark> 标签）
     │
     ├── hooks/                    # 自定义 Hooks
-    │   ├── useSocket.ts          # Socket.IO 连接管理（lock/unlock/schema:updated/schema:save/locale:save + 保存状态流）
+    │   ├── useSocket.ts          # Socket.IO 连接管理（schema:updated/schema:save/locale:save + 保存状态流）
     │   ├── useProjectEditor.ts   # 项目加载 + beforeunload 未保存提示
     │   └── useSearch.ts          # 全局跨语言搜索（遍历 openLocales 匹配译文内容）
     │
     ├── stores/                   # Zustand stores
     │   ├── editorStore.ts        # 编辑状态（schema/openLocales/activeLang/isDirty/saveStatus/saveError + applyLocaleSync/reconcileSchemaInLocales）
-    │   └── collaborationStore.ts # 协作状态（onlineCount/locks/overwrittenMessage + isLockedByOther）
+    │   └── collaborationStore.ts # 协作状态（onlineCount/overwrittenMessage + setOnlineCount/setOverwrittenMessage/reset）
     │
     ├── lib/                      # 服务端库与工具
     │   ├── data-layer/
@@ -227,7 +228,7 @@ project-root/
     │   │   ├── locales.ts         # Locale 管理 + 增量更新 + 最后语言保护
     │   │   └── import-export.ts   # 导入预览/执行 + 导出打包（archiver ZIP）
     │   ├── validation.ts         # Zod 校验（projectTitle/lang/schemaObject/importStrategy/exportLanguages）
-    │   ├── socket-handler.ts     # WebSocket 服务端处理（lock/unlock/schema:updated/schema:save/locale:save/online_count/disconnect 清理）
+    │   ├── socket-handler.ts     # WebSocket 服务端处理（schema:updated/schema:save/locale:save/online_count/disconnect 清理）
     │   ├── api-wrapper.ts        # 统一 API 封装（withApiHandler HOF + CustomError）
     │   └── utils.ts              # flattenObject/unflattenObject/setNestedValue/getLeafPaths/createNestedFromPaths/findMissingPaths/emptyTranslationsFromSchema/hasNestedPath/deepClone/deepMergeTemplate
     │
@@ -235,8 +236,7 @@ project-root/
         ├── api.ts                # ApiResponse<T> / ErrorCode 枚举
         ├── project.ts            # ProjectMeta / ProjectCreateInput / ProjectUpdateInput
         ├── schema.ts             # SchemaObject / TranslationObject（均为 Record<string, any>，支持嵌套）
-        ├── collaboration.ts      # LockMessage / SchemaUpdatedPayload / SchemaSavePayload / LocaleSavePayload / SocketEvent / UpdatePayload / OverwrittenPayload / OnlineCountPayload / SchemaRejectedPayload
-        └── jsoneditor.d.ts       # 旧版 jsoneditor 类型声明（已弃用）
+        └── collaboration.ts      # SchemaUpdatedPayload / SchemaSavePayload / LocaleSavePayload / SocketEvent / UpdatePayload / OverwrittenPayload / OnlineCountPayload / SchemaRejectedPayload
 ```
 
 ### 3.6 关键实施说明
@@ -460,7 +460,7 @@ const DEFAULT_OPTIONS = {
   automaticLayout: true,
   formatOnPaste: true,
   formatOnType: false,            // 注意：实际为 false，非 true
-  readOnly: false,                // 根据锁定状态动态切换（仅视觉锁定，不强制只读）
+  readOnly: false,
   minimap: { enabled: false },
   scrollBeyondLastLine: false,
   fontSize: 14,
@@ -480,17 +480,7 @@ const DEFAULT_OPTIONS = {
 - **译文变更**：用户编辑某个语言 JSON 后，同样通过 RxJS 防抖管道，仅更新该语言文件，通过 Socket.IO 事件（`locale:save`）持久化。
 - **Tab 切换**：切换时，编辑器内容会更新为新的语言数据。
 
-#### 6.2.4 键级锁定可视化（仅提示，不阻塞编辑）
-- **目标**：在不影响用户编辑流畅性的前提下，提供其他用户正在编辑某个键的视觉提示。
-- **实现方式**：
-  - 用户在编辑器中**聚焦**某一行（通过光标位置）时，前端尝试推断当前光标所在的 JSON 键路径（通过正则匹配当前行内容 `^\s*"([^"]+)"\s*:`），若成功则向服务端发送 `lock` 消息（携带 `projectId`, `keyPath`, `language`）。
-  - 服务端维护每个键的锁定状态（含锁持有者 IP 和超时时间），并广播给房间内其他客户端。
-  - 其他客户端接收到 `lock` 后，**不禁止**用户编辑，而是在编辑器外部（如状态栏或悬浮提示）显示"该键正在被他人编辑"的标记。
-  - 用户失去焦点（编辑器 blur）时，发送 `unlock`。
-- **超时与异常处理**：
-  - 服务端为每个锁定实例维护 `setTimeout`，超时时间由 `LOCK_TIMEOUT` 环境变量定义（默认 30000 毫秒）。
-  - 超时自动释放锁并广播 `unlock`，避免残留标记。
-  - 若客户端 socket 意外断开，服务端立即清除该客户端的所有锁并广播。
+#### 6.2.4 冲突处理与视觉提示
 - **乐观锁冲突处理**：
   - Schema 变更采用**时间戳冲突检测**：客户端发送 `schema:updated` 事件时携带时间戳，服务端比对拒绝过期变更（`schema:rejected`），客户端收到后自动同步到最新已接受的数据。
   - 被覆盖用户收到 `overwritten` 提示后，界面显示短暂通知"该键已被他人更新"（3 秒自动消失），但不会阻塞其继续操作。
@@ -518,11 +508,11 @@ const DEFAULT_OPTIONS = {
 
 ### 6.3 嵌套键的扁平化（Flatten）与还原（Unflatten）算法
 
-以下场景需使用扁平化键路径：导入/导出预览、搜索关键词匹配、WebSocket 锁定消息中的 `keyPath` 传输、键重复检测、增量传输中的路径标识。
+以下场景需使用扁平化键路径：导入/导出预览、搜索关键词匹配、键重复检测、增量传输中的路径标识。
 
 **扁平化规则**：
 - 使用 `.` 作为分隔符，如 `{ "emp": { "name": "姓名" } }` → `{ "emp.name": "姓名" }`。
-- 数组类型不支持（`flattenObject` 遇到数组将抛出错误；`import-export.ts` 中的 `flattenForImport` 保留数组值原样不展开）。
+- 数组类型保留原样：`flattenObject` 和 `import-export.ts` 中的 `flattenForImport` 遇到数组时保留该数组作为叶子值，不展开为点分隔键，不抛错。
 - 深度优先遍历，按键名字典序排列。
 - **空嵌套对象**：`flattenObject` 遇到空嵌套对象 `{}` 时保留为叶子节点（值为空字符串 `""`），如 `{ "yiku": {} }` → `{ "yiku": "" }`。`deepMergeTemplate` 在还原时确保空嵌套对象的译文保持为 `{}` 而非 `""`。
 
@@ -547,13 +537,12 @@ const DEFAULT_OPTIONS = {
 - 服务端接收增量数据后，按扁平路径应用到当前数据，再还原为嵌套结构（`unflattenObject`）写入文件。
 - 扁平化路径也用于 WebSocket 广播中的 `keyPath` 字段，确保增量变更消息精准定位到变更节点。
 
-### 6.4 WebSocket 连接与锁机制实现
+### 6.4 WebSocket 连接与实时协作实现
 
-#### 6.4.1 身份标识与连接流程
-无用户系统，通过客户端 IP 区分操作者（服务端获取）：
+#### 6.4.1 连接流程
+无用户系统，通过 Socket.IO 实现实时协作：
 1. 前端创建 Socket.IO 客户端时，在 `query` 中携带 `projectId`。
-2. 服务端从 `socket.handshake.headers` 提取 IP（优先 `x-forwarded-for`，否则 `socket.handshake.address`，降级为 `socket.id`）。
-3. 执行 `socket.join(\`room:project-${projectId}\`)`，并广播 `online_count`。
+2. 执行 `socket.join(\`room:project-${projectId}\`)`，并广播 `online_count`。
 
 #### 6.4.2 Socket.IO 事件协议
 
@@ -561,8 +550,6 @@ const DEFAULT_OPTIONS = {
 
 | 事件 | 载荷 | 说明 |
 |------|------|------|
-| `lock` | `{ projectId, keyPath, language }` | 请求键级锁定 |
-| `unlock` | `{ projectId, keyPath, language }` | 释放键级锁定 |
 | `update` | `{ projectId, type, lang?, data }` | 通用数据更新广播 |
 | `schema:updated` | `SchemaUpdatedPayload` | Schema 变更广播（含时间戳冲突检测） |
 | `schema:save` | `SchemaSavePayload` | Schema 持久化到磁盘 |
@@ -572,11 +559,9 @@ const DEFAULT_OPTIONS = {
 
 | 事件 | 载荷 | 说明 |
 |------|------|------|
-| `lock` | `LockMessage` | 广播锁定状态（除发送者） |
-| `unlock` | `{ keyPath, language, ip, reason? }` | 广播解锁（超时/断连/主动） |
 | `update` | `UpdatePayload` | 数据更新通知 |
 | `online_count` | `{ count }` | 在线人数变更 |
-| `overwritten` | - | 被覆盖通知 |
+| `overwritten` | - | ⚠️ 客户端有监听，服务端暂无发送点（预留） |
 | `schema:updated` | `SchemaUpdatedPayload` | Schema 变更广播 |
 | `schema:rejected` | `{ reason, acceptedTimestamp, acceptedData }` | Schema 变更被拒绝（时间戳冲突） |
 | `schema:saved` | `{ success, projectId, error? }` | Schema 保存结果 |
@@ -586,15 +571,6 @@ const DEFAULT_OPTIONS = {
 **载荷类型定义**（`src/types/collaboration.ts`）：
 
 ```typescript
-export interface LockMessage {
-  type: 'lock' | 'unlock';
-  projectId: string;
-  keyPath: string;      // 扁平化路径，如 "emp.name"
-  language: string;
-  ip: string;           // 服务端填充
-  timestamp: number;
-}
-
 export interface SchemaUpdatedPayload {
   projectId: string;
   schema: Record<string, any>;
@@ -642,15 +618,9 @@ export interface OnlineCountPayload {
 }
 ```
 
-#### 6.4.3 超时管理（必须严格实现）
-- 服务端为每个锁定实例维护一个独立的 `setTimeout`，超时时间由 `LOCK_TIMEOUT` 环境变量定义（默认 30000 毫秒）。
-- **定时器清除条件**：收到客户端主动发出的 `unlock` 消息，或该客户端 socket 意外断开时，必须立即清除对应的定时器，并广播 `unlock`，防止残留锁阻塞他人。
-- 同一 socket 对同一 `language:keyPath` 重复发送 `lock` 时，先释放旧锁再设置新锁。
-
-#### 6.4.4 房间与消息广播
+#### 6.4.3 房间与消息广播
 - 所有客户端连接时加入 `room:project-{projectId}` 房间。
 - 消息类型：
-  - `lock` / `unlock`：广播给房间内除发送者外的所有客户端。
   - `update`：主表或译文变更后广播（除发送者）。
   - `overwritten`：服务端通知被覆盖者（仅发送给被覆盖的客户端）。
   - `online_count`：房间人数变更时广播给所有客户端。
@@ -659,14 +629,14 @@ export interface OnlineCountPayload {
   - `schema:saved` / `locale:saved`：仅发送给发起保存的客户端。
   - `locale:synced`：广播给房间内所有客户端。
 
-#### 6.4.5 Schema 时间戳冲突检测
+#### 6.4.4 Schema 时间戳冲突检测
 - 服务端维护模块级 `globalSchemaTimestamps: Map<string, number>` 和 `globalAcceptedData: Map<string, any>`。
 - 客户端发送 `schema:updated` 时携带 `timestamp`，服务端与 `globalSchemaTimestamps` 比对：
   - 若 `timestamp < lastTimestamp`，拒绝并返回 `schema:rejected`（含最新已接受数据）。
   - 若 `timestamp >= lastTimestamp`，接受并广播给房间内其他客户端。
 - HTTP PATCH 接口（`/api/projects/[id]/schema/keys`）同样支持可选的 `timestamp` 参数进行冲突检测（`lastSchemaTimestamps` 在 `schema.ts` 模块级维护）。
 
-#### 6.4.6 Socket.IO 持久化保存
+#### 6.4.5 Socket.IO 持久化保存
 - Schema 和 Locale 的保存通过 Socket.IO 事件（`schema:save`、`locale:save`）直接持久化到磁盘，替代 HTTP PATCH 增量接口作为主要保存路径。
 - 保存结果通过 `schema:saved` / `locale:saved` 回执返回给发起保存的客户端。
 - 客户端 `useSocket` hook 维护 RxJS 保存状态流（`savingStart$` + `saveResult$`），确保 "保存中" 状态至少显示 800ms（避免一闪而过），"已保存" 状态 2s 后自动回到 idle。
@@ -691,7 +661,6 @@ export interface OnlineCountPayload {
 #### 6.6.1 环境变量
 ```env
 NEXT_PUBLIC_AUTO_SAVE_DEBOUNCE=1000   # 自动保存防抖延迟（毫秒），编辑器 onChange 经 RxJS debounceTime 后触发保存
-LOCK_TIMEOUT=30000                    # 键级锁定超时（毫秒），超时后 WebSocket 自动释放锁
 NEXT_PUBLIC_WS_URL=http://localhost:3000  # 前端 Socket.IO 连接地址
 DATA_DIR=./data                       # 数据持久化根目录，项目文件写入 {DATA_DIR}/projects/{projectId}/
 # PORT=3000                           # HTTP/WebSocket 监听端口（server.ts 使用，默认 3000）
@@ -746,19 +715,49 @@ DATA_DIR=./data                       # 数据持久化根目录，项目文件�
 - **关闭**：点击 Tab 上的 `x`，移除 Tab（不删除文件），**至少保留一个 Tab**。
 - **添加新语言**：在"+"下拉菜单底部选择"添加新语言"，弹出 Modal 输入语言标识，调用 API 创建成功后自动打开。
 
-### 6.7 注意事项
+### 6.7 测试与构建
+
+#### 6.7.1 测试栈
+项目使用 **Vitest 4** 作为测试框架，配合 **jsdom** 和 **@testing-library/react** 进行前端组件测试，**@vitest/coverage-v8** 生成测试覆盖率报告。
+
+**测试文件**（共 7 个，172 个测试）：
+- `src/lib/utils.test.ts` — 工具函数测试
+- `src/lib/validation.test.ts` — 验证函数测试
+- `src/lib/data-layer/io.test.ts` — 文件 I/O 测试
+- `src/stores/editorStore.test.ts` — 编辑器状态管理测试
+- `src/stores/collaborationStore.test.ts` — 协作状态管理测试
+- `src/hooks/useSearch.test.ts` — 搜索 hook 测试
+- `src/components/common/SearchHighlight.test.tsx` — 搜索高亮组件测试
+
+**测试命令**：
+```bash
+npm test              # 运行所有测试
+npm run test:watch    # 监听模式运行测试
+npm run test:coverage # 生成测试覆盖率报告
+```
+
+#### 6.7.2 构建与打包
+项目提供以下打包脚本：
+```bash
+npm run build         # Next.js 生产构建
+npm run package       # 完整打包（含依赖）
+npm run package:fast  # 快速打包（不含依赖）
+npm run package:no-dl # 打包（不含下载功能）
+```
+
+### 6.8 注意事项
 
 1. **JSON 格式化**：编辑器应在保存时自动格式化 JSON（调用 `editor.getAction('editor.action.formatDocument')`），以确保存储的 JSON 美观一致。粘贴时也会自动格式化。
 2. **JSON 校验**：若用户输入非法 JSON，应在保存时阻止并给出错误提示（Monaco 编辑器标记红色波浪线 + 工具栏/状态栏错误提示）。
 3. **性能优化**：对于大 JSON 文件，Monaco 本身性能优秀，但应避免频繁解析（使用 RxJS 防抖管道，仅在防抖延迟后解析）。
 4. **协作冲突处理**：Schema 变更采用时间戳冲突检测（过期变更被拒绝），译文变更采用乐观锁后发覆盖，确保用户操作不被阻塞，同时通过通知提示用户冲突情况。
-5. **锁定标记的准确性**：由于锁定基于光标位置推断路径（正则匹配当前行），可能存在误判，需结合用户反馈迭代优化。
-6. **Schema 重命名检测**：`SchemaEditor` 使用启发式算法检测键重命名（同前缀不同末段），通过 `renameMap` 迁移译文值而非先删后增，避免译文数据丢失。
-7. **最后语言保护**：删除语言时，若为项目最后一个语言则返回 409 拒绝删除。
-8. **Next.js 16 canary 兼容**：`fix-async-storage.cjs` 通过 `--require` 在启动前注入 `globalThis.AsyncLocalStorage`。
-9. **空嵌套对象处理**：`flattenObject` 遇到空嵌套对象 `{}` 时保留为叶子节点（值为空字符串 `""`），`deepMergeTemplate` 确保还原时空嵌套对象保持为 `{}` 而非被错误存储为 `""`。
-10. **防抖/节流使用 RxJS**：涉及防抖（debounce）、去重（distinctUntilChanged）等响应式操作，应优先使用 **RxJS** `Observable` 管道处理，而非原生 `setTimeout`/`clearTimeout`。典型场景：编辑器 `onChange` → `Subject` → `pipe(debounceTime(1000), distinctUntilChanged())` → 解析/保存。
-11. **Socket.IO 持久化优先**：Schema 和 Locale 的保存通过 Socket.IO 事件（`schema:save`、`locale:save`）直接持久化，HTTP PATCH 增量接口作为备用。
-12. **Express 5 路由变更**：Express 5（path-to-regexp v8）不支持通配符路径，`server.ts` 使用无路径 `use()` 作为兜底处理所有非 Socket.IO 请求。
+5. **Schema 重命名检测**：`SchemaEditor` 使用启发式算法检测键重命名（同前缀不同末段），通过 `renameMap` 迁移译文值而非先删后增，避免译文数据丢失。
+6. **最后语言保护**：删除语言时，若为项目最后一个语言则返回 409 拒绝删除。
+7. **Next.js 16 canary 兼容**：`fix-async-storage.cjs` 通过 `--require` 在启动前注入 `globalThis.AsyncLocalStorage`。
+8. **空嵌套对象处理**：`flattenObject` 遇到空嵌套对象 `{}` 时保留为叶子节点（值为空字符串 `""`），`deepMergeTemplate` 确保还原时空嵌套对象保持为 `{}` 而非被错误存储为 `""`。
+9. **防抖/节流使用 RxJS**：涉及防抖（debounce）、去重（distinctUntilChanged）等响应式操作，应优先使用 **RxJS** `Observable` 管道处理，而非原生 `setTimeout`/`clearTimeout`。典型场景：编辑器 `onChange` → `Subject` → `pipe(debounceTime(1000), distinctUntilChanged())` → 解析/保存。
+10. **Socket.IO 持久化优先**：Schema 和 Locale 的保存通过 Socket.IO 事件（`schema:save`、`locale:save`）直接持久化，HTTP PATCH 增量接口作为备用。
+11. **Express 5 路由变更**：Express 5（path-to-regexp v8）不支持通配符路径，`server.ts` 使用无路径 `use()` 作为兜底处理所有非 Socket.IO 请求。
+12. **数组支持**：`flattenObject` 和 `import-export.ts` 中的 `flattenForImport` 遇到数组时保留该数组作为叶子值，不展开为点分隔键，不抛错。
 
 ---

@@ -1,17 +1,7 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
-import type { LockMessage, UpdatePayload, SchemaUpdatedPayload, SchemaSavePayload, LocaleSavePayload } from '../types/collaboration';
+import type { UpdatePayload, SchemaUpdatedPayload, SchemaSavePayload, LocaleSavePayload, LocaleUpdatedPayload } from '../types/collaboration';
 import { updateSchema } from './data-layer/schema';
 import { updateLocale } from './data-layer/locales';
-
-const LOCK_TIMEOUT = parseInt(process.env.LOCK_TIMEOUT || '30000', 10);
-
-interface LockEntry {
-  keyPath: string;
-  language: string;
-  ip: string;
-  socketId: string;
-  timer: ReturnType<typeof setTimeout>;
-}
 
 // 模块级 IO 实例，供 data-layer 等模块广播事件
 // 使用 globalThis 跨 Next.js 打包边界共享，因 API 路由会被 Next.js 重新打包为独立模块作用域
@@ -43,9 +33,6 @@ export function setupSocketHandlers(io: SocketIOServer): void {
       return;
     }
 
-    // 从请求头获取客户端 IP
-    const ip = getClientIp(socket);
-
     // 加入项目房间
     const roomName = `room:project-${projectId}`;
     socket.join(roomName);
@@ -54,63 +41,6 @@ export function setupSocketHandlers(io: SocketIOServer): void {
     const room = io.sockets.adapter.rooms.get(roomName);
     const onlineCount = room ? room.size : 0;
     io.to(roomName).emit('online_count', { count: onlineCount });
-
-    // 每个 socket 的锁集合
-    const socketLocks = new Map<string, LockEntry>();
-
-    // 键级锁定
-    socket.on('lock', (data: Omit<LockMessage, 'ip' | 'timestamp'>) => {
-      const lockKey = `${data.language}:${data.keyPath}`;
-
-      // 先释放该 socket 旧的同名锁
-      if (socketLocks.has(lockKey)) {
-        clearTimeout(socketLocks.get(lockKey)!.timer);
-        socketLocks.delete(lockKey);
-      }
-
-      const lockMessage: LockMessage = {
-        type: 'lock',
-        projectId,
-        keyPath: data.keyPath,
-        language: data.language,
-        ip,
-        timestamp: Date.now(),
-      };
-
-      // 设置超时自动释放
-      const timer = setTimeout(() => {
-        socket.emit('unlock', { keyPath: data.keyPath, language: data.language, reason: 'timeout' });
-        socket.to(roomName).emit('unlock', { keyPath: data.keyPath, language: data.language, ip });
-        socketLocks.delete(lockKey);
-      }, LOCK_TIMEOUT);
-
-      socketLocks.set(lockKey, {
-        keyPath: data.keyPath,
-        language: data.language,
-        ip,
-        socketId: socket.id,
-        timer,
-      });
-
-      // 广播给房间其他人（排除自己）
-      socket.to(roomName).emit('lock', lockMessage);
-    });
-
-    // 解锁
-    socket.on('unlock', (data: { keyPath: string; language: string }) => {
-      const lockKey = `${data.language}:${data.keyPath}`;
-      const lock = socketLocks.get(lockKey);
-      if (lock) {
-        clearTimeout(lock.timer);
-        socketLocks.delete(lockKey);
-      }
-
-      socket.to(roomName).emit('unlock', {
-        keyPath: data.keyPath,
-        language: data.language,
-        ip,
-      });
-    });
 
     // 数据更新广播
     socket.on('update', (data: UpdatePayload) => {
@@ -139,6 +69,25 @@ export function setupSocketHandlers(io: SocketIOServer): void {
 
     // Schema 持久化保存（通过 Socket.IO 替代 HTTP PATCH）
     socket.on('schema:save', async (data: SchemaSavePayload) => {
+      // 与 schema:updated 共用同一套时间戳检测：
+      // 若只在广播侧拒绝而此处仍无条件写盘，会出现磁盘内容与所有客户端显示不一致。
+      // 用 < 而非 <=，保证同一次编辑先发的 schema:updated 不会卡掉随后的 schema:save。
+      const lastTimestamp = globalSchemaTimestamps.get(projectId) || 0;
+      if (typeof data.timestamp === 'number' && data.timestamp < lastTimestamp) {
+        socket.emit('schema:rejected', {
+          reason: 'stale_timestamp',
+          acceptedTimestamp: lastTimestamp,
+          acceptedData: globalAcceptedData.get(projectId),
+        });
+        // 必须同时回执，否则客户端 saveStatus 永久卡在 'saving'
+        socket.emit('schema:saved', {
+          success: false,
+          projectId: data.projectId,
+          error: 'Schema 已被其他用户更新，本次保存已跳过',
+        });
+        return;
+      }
+
       try {
         // 直接写入嵌套 schema 对象
         await updateSchema(data.projectId, data.schema);
@@ -148,6 +97,13 @@ export function setupSocketHandlers(io: SocketIOServer): void {
         socket.emit('schema:saved', { success: false, error: msg });
         socket.emit('error', { message: msg });
       }
+    });
+
+    // Locale 变更广播（与 schema:updated 对称）。
+    // 译文走 last-write-wins：不做时间戳拒绝，因为 locale:save 对磁盘是无条件覆盖写，
+    // 若只在广播侧拒绝会导致磁盘内容与客户端显示不一致。
+    socket.on('locale:updated', (data: LocaleUpdatedPayload) => {
+      socket.to(roomName).emit('locale:updated', data);
     });
 
     // Locale 持久化保存（通过 Socket.IO 替代 HTTP PATCH）
@@ -164,30 +120,10 @@ export function setupSocketHandlers(io: SocketIOServer): void {
 
     // 断开连接清理
     socket.on('disconnect', () => {
-      // 清理该 socket 的所有锁
-      for (const [, lock] of socketLocks) {
-        clearTimeout(lock.timer);
-        socket.to(roomName).emit('unlock', {
-          keyPath: lock.keyPath,
-          language: lock.language,
-          ip: lock.ip,
-          reason: 'disconnect',
-        });
-      }
-      socketLocks.clear();
-
       // 更新在线人数
       const updatedRoom = io.sockets.adapter.rooms.get(roomName);
       const updatedCount = updatedRoom ? updatedRoom.size : 0;
       io.to(roomName).emit('online_count', { count: updatedCount });
     });
   });
-}
-
-function getClientIp(socket: Socket): string {
-  const forwarded = socket.handshake.headers['x-forwarded-for'];
-  if (forwarded) {
-    return Array.isArray(forwarded) ? forwarded[0] : forwarded.split(',')[0].trim();
-  }
-  return socket.handshake.address || socket.id;
 }

@@ -15,6 +15,7 @@ export default defineConfig({
     coverage: {
       include: [
         'src/lib/utils.ts',
+        'src/lib/monaco-edits.ts',
         'src/lib/validation.ts',
         'src/stores/editorStore.ts',
         'src/stores/collaborationStore.ts',

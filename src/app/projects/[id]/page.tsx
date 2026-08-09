@@ -28,7 +28,7 @@ export default function ProjectEditorPage({ params }: Props) {
   const [globalSearchKeyword, setGlobalSearchKeyword] = useState('');
 
   const { loadProject } = useProjectEditor({ projectId: id });
-  const { sendSchemaUpdated, sendSchemaSave, sendLocaleSave, socketId } = useSocket({ projectId: id });
+  const { sendSchemaUpdated, sendSchemaSave, sendLocaleUpdated, sendLocaleSave } = useSocket({ projectId: id });
   const isLoading = useEditorStore((s) => s.isLoading);
   const projectTitle = useEditorStore((s) => s.projectTitle);
   const availableLocales = useEditorStore((s) => s.availableLocales);
@@ -110,14 +110,14 @@ export default function ProjectEditorPage({ params }: Props) {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <div style={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column', borderRight: '1px solid #f0f0f0' }}>
           <div style={{ height: 40, display: 'flex', alignItems: 'center', padding: '0 16px', borderBottom: '1px solid #f0f0f0', fontWeight: 600, fontSize: 14, flexShrink: 0, boxSizing: 'border-box', overflow: 'hidden' }}>主表 Schema</div>
-          <div style={{ flex: 1, overflow: 'auto' }}><SchemaEditor ref={schemaEditorRef} sendSchemaUpdated={sendSchemaUpdated} sendSchemaSave={sendSchemaSave} socketId={socketId} onScrollChange={handleSchemaScroll} /></div>
+          <div style={{ flex: 1, overflow: 'auto' }}><SchemaEditor ref={schemaEditorRef} sendSchemaUpdated={sendSchemaUpdated} sendSchemaSave={sendSchemaSave} onScrollChange={handleSchemaScroll} /></div>
         </div>
         <div style={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column' }}>
           <div style={{ height: 40, display: 'flex', alignItems: 'center', padding: '0 16px', borderBottom: '1px solid #f0f0f0', flexShrink: 0, boxSizing: 'border-box', overflow: 'hidden' }}>
             <LanguageTabs projectId={id} availableLocales={availableLocales} onRefreshLocales={loadProject} />
           </div>
           <LocaleStatusBar />
-          <div style={{ flex: 1, overflow: 'auto' }}><LocaleEditor ref={localeEditorRef} sendLocaleSave={sendLocaleSave} onScrollChange={handleLocaleScroll} /></div>
+          <div style={{ flex: 1, overflow: 'auto' }}><LocaleEditor ref={localeEditorRef} sendLocaleSave={sendLocaleSave} sendLocaleUpdated={sendLocaleUpdated} onScrollChange={handleLocaleScroll} /></div>
         </div>
       </div>
       <ImportPreviewDialog projectId={id} open={importOpen}

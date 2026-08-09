@@ -28,6 +28,7 @@ interface EditorState {
   closeLocale: (lang: string) => void;
   setActiveLang: (lang: string | null) => void;
   updateTranslation: (lang: string, translations: TranslationObject) => void;
+  setTranslation: (lang: string, translations: TranslationObject) => void;
   applyLocaleSync: (addedKeys: string[], removedKeys: string[], renameMap?: Record<string, string>) => void;
   reconcileSchemaInLocales: (newSchema: SchemaObject) => void;
   sortAllKeys: () => void;
@@ -123,6 +124,19 @@ export const useEditorStore = create<EditorState>((set) => ({
         openLocales: { ...state.openLocales, [lang]: sanitized },
         isDirty: true,
         saveStatus: 'dirty',
+      };
+    }),
+
+  // 远端来源的译文更新（其他客户端广播）。
+  // 与 updateTranslation 的唯一区别：不触碰 isDirty/saveStatus——
+  // 收到别人的改动却显示「未保存」是错的，还可能触发回存循环。
+  // 语义对照 setSchema（同样不置 dirty）。
+  setTranslation: (lang, translations) =>
+    set((state) => {
+      const template = emptyTranslationsFromSchema(state.schema);
+      const sanitized = deepMergeTemplate(translations, template);
+      return {
+        openLocales: { ...state.openLocales, [lang]: sanitized },
       };
     }),
 

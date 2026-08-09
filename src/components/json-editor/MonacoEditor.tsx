@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useImperativeHandle, forwardRef, memo, use
 import dynamic from 'next/dynamic';
 import type { editor } from 'monaco-editor';
 import type { OnMount } from '@monaco-editor/react';
+import { computeMinimalEdit } from '@/lib/monaco-edits';
 
 // 动态导入 Monaco Editor（SSR 安全）
 const Editor = dynamic(() => import('@monaco-editor/react').then((mod) => mod.default), {
@@ -118,11 +119,28 @@ function MonacoEditorComponent(
     [onChange]
   );
 
-  // ---------- 外部 value prop 同步（仅当非用户行为时执行） ----------
-  // 用户编辑时不走 value prop 回写路径，从而避免 Monaco 重新 setValue 导致光标跳转
-  useEffect(() => {
+  // ---------- 以最小编辑写入内容（替代 setValue） ----------
+  // setValue 会整体替换 model 缓冲区，清空 undo/redo 栈、重置折叠状态、丢失选区。
+  // 实时协作下别人每改一次值都会清掉本地这些状态，因此改用 pushEditOperations
+  // 施加最小整行替换——它追加到 undo 栈而非清空，未触及的行保留折叠状态。
+  // 光标由 Monaco 依据编辑范围自动调整，不需要手动保存/恢复。
+  const applyValue = useCallback((newValue: string) => {
     const editor = editorRef.current;
-    if (!editor || !isReady) return;
+    if (!editor) return;
+    const model = editor.getModel();
+    if (!model) return;
+
+    const edit = computeMinimalEdit(model.getValue(), newValue);
+    if (!edit) return; // 内容相同，无需操作
+
+    // pushEditOperations 保留 undo 栈；第三个参数返回 null 表示沿用 Monaco 的默认光标策略
+    model.pushEditOperations([], [edit], () => null);
+  }, []);
+
+  // ---------- 外部 value prop 同步（仅当非用户行为时执行） ----------
+  // 用户编辑时不走 value prop 回写路径，避免与用户输入竞争
+  useEffect(() => {
+    if (!editorRef.current || !isReady) return;
 
     // 跳过由用户 onChange 触发的重渲染（编辑器内容已最新）
     if (fromUserRef.current) {
@@ -130,41 +148,14 @@ function MonacoEditorComponent(
       return;
     }
 
-    const currentEditorValue = editor.getValue();
-    if (value !== currentEditorValue) {
-      // 保存并恢复光标 / 滚动位置
-      const position = editor.getPosition();
-      const scrollTop = editor.getScrollTop();
-      const scrollLeft = editor.getScrollLeft();
-
-      editor.setValue(value);
-
-      if (position) {
-        const model = editor.getModel();
-        if (model) {
-          const maxLine = model.getLineCount();
-          const restoredLine = Math.min(position.lineNumber, maxLine);
-          const maxCol = model.getLineMaxColumn(restoredLine);
-          editor.setPosition({ lineNumber: restoredLine, column: Math.min(position.column, maxCol) });
-          editor.setScrollPosition({ scrollTop, scrollLeft });
-        }
-      }
-    }
-  }, [value, isReady]);
+    applyValue(value);
+  }, [value, isReady, applyValue]);
 
   useImperativeHandle(
     ref,
     () => ({
       getValue: () => editorRef.current?.getValue() ?? '',
-      setValue: (newValue: string) => {
-        const editor = editorRef.current;
-        if (editor) {
-          const currentValue = editor.getValue();
-          if (currentValue !== newValue) {
-            editor.setValue(newValue);
-          }
-        }
-      },
+      setValue: (newValue: string) => applyValue(newValue),
       focus: () => editorRef.current?.focus(),
       find: (term: string) => {
         const editor = editorRef.current;
@@ -204,7 +195,7 @@ function MonacoEditorComponent(
         queueMicrotask(() => { isSyncingScrollRef.current = false; });
       },
     }),
-    []
+    [applyValue]
   );
 
   const mergedOptions = useMemo(

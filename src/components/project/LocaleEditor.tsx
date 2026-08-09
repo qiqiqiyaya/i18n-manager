@@ -6,7 +6,6 @@ import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import { Alert, Popover, Tag, Typography } from 'antd';
 import type { editor } from 'monaco-editor';
 import { useEditorStore } from '@/stores/editorStore';
-import { useCollaborationStore } from '@/stores/collaborationStore';
 import MonacoEditor, { type MonacoEditorHandle } from '@/components/json-editor/MonacoEditor';
 import { flattenObject } from '@/lib/utils';
 import type { TranslationObject } from '@/types/schema';
@@ -21,6 +20,8 @@ const PARSE_DEBOUNCE = parseInt(
 
 interface LocaleEditorProps {
   sendLocaleSave?: (lang: string, translations: TranslationObject) => void;
+  /** 广播译文变更给其他客户端（timestamp/clientId 由 useSocket 内部注入） */
+  sendLocaleUpdated?: (lang: string, translations: TranslationObject) => void;
   onScrollChange?: (ratio: number) => void;
 }
 
@@ -28,7 +29,7 @@ interface LocaleEditorProps {
 export type LocaleEditorHandle = MonacoEditorHandle & { flushSave: () => void };
 
 const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
-  function LocaleEditor({ sendLocaleSave, onScrollChange }, ref) {
+  function LocaleEditor({ sendLocaleSave, sendLocaleUpdated, onScrollChange }, ref) {
   const editorRef = useRef<MonacoEditorHandle>(null);
 
   const activeLang = useEditorStore((s) => s.activeLang);
@@ -64,23 +65,14 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
   const [referenceKey, setReferenceKey] = useState<string | null>(null);
   const [referenceVisible, setReferenceVisible] = useState(false);
 
-  // 当前语言的所有锁定键
-  const locks = useCollaborationStore((s) => s.locks);
-  const activeLocks = activeLang ? locks[activeLang] || {} : {};
-
   // Schema 变更警告（用户编辑中时外部更新了数据）
   const [schemaChangeWarning, setSchemaChangeWarning] = useState(false);
 
   // ---------- 辅助：从 store 同步内容到 Monaco 编辑器 ----------
   // 序列化 → setEditorText → setValue（带 programmatic flag 防止误触发 onChange）
-  // preservePosition: 是否在写入后恢复光标和滚动位置（外部数据更新时需要）
-  const syncEditorFromStore = useCallback((preservePosition = false) => {
+  // setValue 内部走最小编辑，Monaco 依据编辑范围自动调整光标，无需手动保存/恢复位置
+  const syncEditorFromStore = useCallback(() => {
     if (!activeLang || !openLocales[activeLang]) return;
-
-    const editor = preservePosition ? editorRef.current?.getEditor() : null;
-    const position = editor?.getPosition();
-    const scrollTop = editor?.getScrollTop();
-    const scrollLeft = editor?.getScrollLeft();
 
     const formatted = JSON.stringify(openLocales[activeLang], null, 2);
     setEditorText(formatted);
@@ -95,20 +87,6 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
     // openLocales 变化）时意外弹出翻译参考层
     suppressCursorRef.current = true;
     queueMicrotask(() => { suppressCursorRef.current = false; });
-
-    if (preservePosition && editor && position) {
-      const model = editor.getModel();
-      if (model) {
-        const maxLine = model.getLineCount();
-        const restoredLine = Math.min(position.lineNumber, maxLine);
-        const maxCol = model.getLineMaxColumn(restoredLine);
-        const restoredCol = Math.min(position.column, maxCol);
-        editor.setPosition({ lineNumber: restoredLine, column: restoredCol });
-      }
-      if (scrollTop !== undefined) {
-        editor.setScrollPosition({ scrollTop, scrollLeft });
-      }
-    }
   }, [activeLang, openLocales]);
 
   // ---------- 切换语言时强制同步编辑器 ----------
@@ -127,6 +105,9 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
           if (currentHash !== lastSyncedRef.current) {
             updateTranslation(prevLang, parsed);
             lastSyncedRef.current = currentHash;
+            if (sendLocaleUpdated) {
+              sendLocaleUpdated(prevLang, parsed);
+            }
             if (sendLocaleSave) {
               sendLocaleSave(prevLang, parsed);
             }
@@ -162,7 +143,7 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
 
     const formatted = JSON.stringify(openLocales[activeLang], null, 2);
     if (formatted !== editorText) {
-      syncEditorFromStore(true);
+      syncEditorFromStore();
     }
   }, [openLocales]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -189,6 +170,11 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
           lastSyncedRef.current = cleanHash;
           setValidationError(null);
 
+          // 广播给其他客户端（改动前译文完全不同步，这是本次修复的一部分）
+          if (sendLocaleUpdated) {
+            sendLocaleUpdated(activeLang, parsed);
+          }
+
           // 通过 Socket.IO 持久化到磁盘（替代 HTTP PATCH）
           if (sendLocaleSave && activeLang) {
             sendLocaleSave(activeLang, parsed);
@@ -201,7 +187,7 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
         setValidationError(msg);
       }
     };
-  }, [activeLang, updateTranslation, sendLocaleSave]);
+  }, [activeLang, updateTranslation, sendLocaleUpdated, sendLocaleSave]);
 
   // ---------- 立即保存（Ctrl+S） ----------
   // 直接调用 parseLogic 绕过防抖；parseLogic 内含内容哈希去重（无变化则跳过）
@@ -382,7 +368,6 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
   }
 
   const referenceData = getReferenceData();
-  const hasLocks = Object.keys(activeLocks).length > 0;
 
   const referenceContent = referenceData ? (
     <div style={{ maxWidth: 400, fontSize: 13 }}>
@@ -417,12 +402,6 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
       {/* 条件提示（绝对定位浮层，不挤占编辑器空间，保持与 Schema 编辑器高度一致） */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, display: 'flex', flexDirection: 'column' }}>
-        {hasLocks && (
-          <div style={{ padding: '4px 12px', background: '#fff7e6', borderBottom: '1px solid #ffd591', fontSize: 12, color: '#d46b08' }}>
-            <span role="img" aria-label="lock">🔒</span> 有 {Object.keys(activeLocks).length} 个键正在被他人编辑
-          </div>
-        )}
-
         {schemaChangeWarning && (
           <div style={{ padding: '4px 12px', background: '#fffbe6', borderBottom: '1px solid #ffe58f', fontSize: 12, color: '#d48806' }}>
             <span role="img" aria-label="warning">⚠️</span> Schema 已更新，完成编辑后保存以应用新结构

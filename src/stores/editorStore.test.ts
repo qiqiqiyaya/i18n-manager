@@ -159,6 +159,61 @@ describe('editorStore', () => {
     });
   });
 
+  describe('setTranslation', () => {
+    it('updates translation WITHOUT setting dirty (remote-originated update)', () => {
+      // Arrange — 模拟本地已有未保存改动的场景之外的干净状态
+      useEditorStore.getState().setSchema({ key: 'desc' });
+      useEditorStore.getState().openLocale('zh-CN', { key: '' });
+
+      // Act — 收到其他客户端广播的译文
+      useEditorStore.getState().setTranslation('zh-CN', { key: '远端值' });
+
+      // Assert — 内容更新，但不应标记为脏（否则会显示「未保存」并可能触发回存循环）
+      expect(useEditorStore.getState().openLocales['zh-CN'].key).toBe('远端值');
+      expect(useEditorStore.getState().isDirty).toBe(false);
+      expect(useEditorStore.getState().saveStatus).toBe('idle');
+    });
+
+    it('does not clear a pre-existing dirty flag', () => {
+      // Arrange — 本地先有未保存改动
+      useEditorStore.getState().setSchema({ key: 'desc' });
+      useEditorStore.getState().openLocale('zh-CN', { key: '' });
+      useEditorStore.getState().updateTranslation('zh-CN', { key: '本地值' });
+      expect(useEditorStore.getState().isDirty).toBe(true);
+
+      // Act — 远端更新到达
+      useEditorStore.getState().setTranslation('zh-CN', { key: '远端值' });
+
+      // Assert — 不应把本地的脏标记抹掉
+      expect(useEditorStore.getState().isDirty).toBe(true);
+    });
+
+    it('sanitizes against schema template like updateTranslation', () => {
+      // Arrange
+      useEditorStore.getState().setSchema({ key: 'desc', missing: 'desc2' });
+      useEditorStore.getState().openLocale('zh-CN', { key: '' });
+
+      // Act
+      useEditorStore.getState().setTranslation('zh-CN', { key: '值' });
+
+      // Assert — 缺失的键按 Schema 模板补空值
+      expect(useEditorStore.getState().openLocales['zh-CN']).toEqual({ key: '值', missing: '' });
+    });
+
+    it('leaves other languages untouched', () => {
+      // Arrange
+      useEditorStore.getState().setSchema({ key: 'desc' });
+      useEditorStore.getState().setOpenLocales({ 'zh-CN': { key: '中文' }, 'en-US': { key: 'english' } });
+
+      // Act
+      useEditorStore.getState().setTranslation('zh-CN', { key: '新中文' });
+
+      // Assert
+      expect(useEditorStore.getState().openLocales['zh-CN'].key).toBe('新中文');
+      expect(useEditorStore.getState().openLocales['en-US'].key).toBe('english');
+    });
+  });
+
   describe('applyLocaleSync', () => {
     beforeEach(() => {
       useEditorStore.getState().setSchema({ a: 'desc', b: 'desc' });

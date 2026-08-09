@@ -43,9 +43,11 @@ function detectRenames(removedKeys: string[], newKeys: string[]): Record<string,
 }
 
 interface SchemaEditorProps {
-  sendSchemaUpdated?: (data: Omit<SchemaUpdatedPayload, 'projectId'>) => void;
+  /** timestamp/clientId 由 useSocket 内部注入（含时钟校准），调用方无需传 */
+  sendSchemaUpdated?: (
+    data: Omit<SchemaUpdatedPayload, 'projectId' | 'timestamp' | 'clientId'>
+  ) => void;
   sendSchemaSave?: (data: { schema: SchemaObject; addedKeys: string[]; removedKeys: string[] }) => void;
-  socketId?: string;
   onScrollChange?: (ratio: number) => void;
 }
 
@@ -53,7 +55,7 @@ interface SchemaEditorProps {
 export type SchemaEditorHandle = MonacoEditorHandle & { flushSave: () => void };
 
 const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
-  function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, socketId, onScrollChange }, ref) {
+  function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, onScrollChange }, ref) {
   const editorRef = useRef<MonacoEditorHandle>(null);
 
   const schema = useEditorStore((s) => s.schema);
@@ -112,34 +114,15 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
     // Schema 现在是嵌套结构，直接显示
     const formatted = JSON.stringify(schema, null, 2);
     if (formatted !== editorText) {
-      // 保存当前光标和滚动位置
-      const editor = editorRef.current?.getEditor();
-      const position = editor?.getPosition();
-      const scrollTop = editor?.getScrollTop();
-      const scrollLeft = editor?.getScrollLeft();
-
       setEditorText(formatted);
       lastSyncedRef.current = formatted;
       setValidationStatus('valid');
       setValidationMessage(null);
+      // setValue 内部走最小编辑，Monaco 会依据编辑范围自动调整光标，
+      // 不需要手动保存/恢复光标与滚动位置（手动恢复反而会把光标拽回过期位置）
       isProgrammaticChangeRef.current = true;
       editorRef.current?.setValue(formatted);
       isProgrammaticChangeRef.current = false;
-
-      // 尝试恢复光标位置（在有效范围内钳制）
-      if (editor && position) {
-        const model = editor.getModel();
-        if (model) {
-          const maxLine = model.getLineCount();
-          const restoredLine = Math.min(position.lineNumber, maxLine);
-          const maxCol = model.getLineMaxColumn(restoredLine);
-          const restoredCol = Math.min(position.column, maxCol);
-          editor.setPosition({ lineNumber: restoredLine, column: restoredCol });
-        }
-        if (scrollTop !== undefined) {
-          editor.setScrollPosition({ scrollTop, scrollLeft });
-        }
-      }
     }
   }, [schema]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -205,6 +188,10 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
           isSelfOriginatedChangeRef.current = true;
           setTimeout(() => { isSelfOriginatedChangeRef.current = false; }, 0);
 
+          // R8: 标记编辑完成，与 LocaleEditor.parseLogic 行为对齐。
+          // 否则「编辑中」状态会一直持续到失焦，导致远端更新到达时长期挂着警告条
+          isEditingRef.current = false;
+
           updateSchema(parsed);
           lastSyncedRef.current = parsedHash;
           setValidationStatus('valid');
@@ -216,15 +203,15 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
             applyLocaleSync(newKeys, effectiveRemovedKeys, renameMap);
           }
 
-          // 广播 Schema 变更给其他客户端（时间戳 + 来源标识）
-          if (sendSchemaUpdated && (newKeys.length > 0 || effectiveRemovedKeys.length > 0)) {
+          // 广播 Schema 变更给其他客户端。
+          // 无条件广播：仅改 key 的 value（说明文字）时 addedKeys/removedKeys 均为空，
+          // 旧实现在此加了键增删条件门，导致值变更永远不同步（本次修复的主因）
+          if (sendSchemaUpdated) {
             sendSchemaUpdated({
               schema: parsed,
               addedKeys: newKeys,
               removedKeys: effectiveRemovedKeys,
               renameMap: Object.keys(renameMap).length > 0 ? renameMap : undefined,
-              timestamp: Date.now(),
-              clientId: socketId || '',
             });
           }
 
@@ -249,7 +236,7 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
         setMonacoMarkers(msg);
       }
     };
-  }, [updateSchema, applyLocaleSync, sendSchemaUpdated, sendSchemaSave, socketId, setMonacoMarkers]);
+  }, [updateSchema, applyLocaleSync, sendSchemaUpdated, sendSchemaSave, setMonacoMarkers]);
 
   // ---------- 立即保存（Ctrl+S） ----------
   // 直接调用 parseLogic 绕过防抖；parseLogic 内含内容哈希去重（无变化则跳过）
@@ -469,8 +456,6 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
         schema: updatedNested,
         addedKeys: newKeys,
         removedKeys: [],
-        timestamp: Date.now(),
-        clientId: socketId || '',
       });
     }
 
@@ -482,7 +467,7 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
         removedKeys: [],
       });
     }
-  }, [schema, updateSchema, applyLocaleSync, sendSchemaUpdated, sendSchemaSave, socketId]);
+  }, [schema, updateSchema, applyLocaleSync, sendSchemaUpdated, sendSchemaSave]);
 
   // ---------- 格式化文档 ----------
   const handleFormat = useCallback(() => {
@@ -491,17 +476,24 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
 
   const handleSort = useCallback(() => {
     sortAllKeys();
-    // 排序后自动保存 Schema 到磁盘
-    if (sendSchemaSave) {
-      const state = useEditorStore.getState();
-      const newFlatKeys = getLeafPaths(state.schema);
-      sendSchemaSave({
+    const state = useEditorStore.getState();
+    // 排序不增删键，仅改变键顺序，故 addedKeys/removedKeys 均为空
+    if (sendSchemaUpdated) {
+      sendSchemaUpdated({
         schema: state.schema,
-        addedKeys: newFlatKeys,
+        addedKeys: [],
         removedKeys: [],
       });
     }
-  }, [sortAllKeys, sendSchemaSave]);
+    // 排序后自动保存 Schema 到磁盘
+    if (sendSchemaSave) {
+      sendSchemaSave({
+        schema: state.schema,
+        addedKeys: [],
+        removedKeys: [],
+      });
+    }
+  }, [sortAllKeys, sendSchemaUpdated, sendSchemaSave]);
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
