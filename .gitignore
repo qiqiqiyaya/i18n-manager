@@ -10,3 +10,5 @@ package-lock.json
 .next
 dist
 tsconfig.tsbuildinfo
+.playwright-mcp
+coverage
