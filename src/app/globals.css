@@ -24,3 +24,9 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* 重复键检测跳转后的临时行高亮（1.5s 后由 JS 清除）
+   见 SchemaEditor.handleJumpToOffset / docs/schema-duplicate-key-detection.md */
+.dup-key-flash {
+  background: rgba(255, 193, 7, 0.25);
+}

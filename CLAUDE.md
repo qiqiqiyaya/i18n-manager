@@ -186,6 +186,42 @@ project-root/
 ## 重要设计约束
 
 0. **Ant Design 组件开发**：编写涉及 Ant Design 组件的代码前，阅读 https://ant.design/llms.txt 并理解组件库 API，在编写 Ant Design 代码时使用这些知识。该文档包含全部 74 个组件的完整 API、版本变更和弃用标记（例如 Modal/Drawer 的 `maskClosable` 已弃用，应使用 `mask={{ closable: false }}`，自 6.3.0 起）
+
+0.1 **Next.js API 必须查本地随包文档，不得凭记忆**：本项目使用 **Next.js 16 canary**（当前 `16.3.0-preview.10`），API 与训练数据中的 13/14/15 差异很大。编写或修改任何涉及 Next.js API 的代码前（Route Handler、`next.config.ts`、缓存/`revalidate`、`metadata`、Server/Client Component 边界、`proxy`、Turbopack 配置等），**先检索 `node_modules/next/dist/docs/`**——Next.js 16+ 把完整文档随包发布，版本与 `package.json` 里装的那个精确对应，不会过时。
+
+   ```bash
+   # 按关键字定位（441 个 md 文件，镜像 nextjs.org/docs 结构）
+   grep -ril "<关键字>" node_modules/next/dist/docs/01-app/
+   ```
+
+   常用入口：
+   - `01-app/01-getting-started/` —— 15-route-handlers / 08-caching / 06-fetching-data / 09-revalidating / 05-server-and-client-components
+   - `01-app/03-api-reference/05-config/01-next-config-js/` —— `next.config.ts` 全部选项
+   - `01-app/03-api-reference/04-functions/` · `03-file-conventions/` · `02-components/`
+   - `01-app/08-turbopack.md`
+
+   > `mcp__next-devtools__nextjs_docs` 只返回文档路径，不返回内容；拿到路径后仍需用 Read/Grep 自己读。**优先级高于任何在线 Next.js 文档和 Context7**——在线文档对应 stable 版，与本项目 canary 不一致。
+
+0.2 **next-devtools MCP 运行时诊断**：dev server 在跑时（`npm run start:server`，端口 3000），优先用 MCP 查运行时真实状态，而不是靠读代码猜。适用场景：编译报错、路由是否注册、运行时异常、慢渲染排查。
+
+   | 工具 | 用途 |
+   |------|------|
+   | `get_errors` | 配置错误 + 浏览器运行时错误 + 构建错误（带 source-map 栈） |
+   | `get_compilation_issues` | 全路由模块图编译问题，**无需浏览器会话** |
+   | `get_routes` | 文件系统扫描出的全部路由入口 |
+   | `get_logs` | 返回 dev 日志文件路径（再自行 Read） |
+   | `get_page_metadata` / `get_request_insights` | 页面渲染贡献者 / 请求时间线（后者需 `experimental.requestInsights`） |
+
+   已实测的两个坑（2026-08-10 验证）：
+   - **`nextjs_index` 必须显式传 `port: "3000"`**。不传时自动发现在本机失败，会误报 "No running Next.js dev servers"——但服务其实是好的，别据此判断服务没起。
+   - **`nextjs_call` 的 `args` 参数当前有 bug**，schema 声明 `string` 而描述要求 object，带参工具（`get_routes` 的 `routerType` 过滤、`compile_route`、`get_server_action_by_id`）调不通。**绕法：直接 curl 打 MCP endpoint**，该路径参数传递正常：
+     ```bash
+     curl -s -X POST -H 'Content-Type: application/json' \
+       -H 'Accept: application/json, text/event-stream' \
+       -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"compile_route","arguments":{"routeSpecifier":"/projects/[id]"}}}' \
+       http://localhost:3000/_next/mcp
+     ```
+   - 自定义 Express server（`start:server`）**不影响** `/_next/mcp` 挂载，MCP 照常可用。
 1. **编辑器必须使用 `@monaco-editor/react`**，不得用 Ant Design Table/Tree 替代
 2. **无键级锁定**：已于 2026-08-09 移除（详见 Project Overview）。若将来重做，须通过 Monaco 的 `onDidChangeCursorPosition` + WebSocket 实现，不得用 `setReadOnly(true)` 全局只读；注意该回调现已被 `LocaleEditor` 的翻译参考浮层占用，需叠加而非替换
 3. **原子写入**：先写临时文件再 `fs.move` 替换，通过 `proper-lockfile` 互斥锁保护（重试 5 次，50-200ms 间隔）—— 这是当前并发安全的主要保障

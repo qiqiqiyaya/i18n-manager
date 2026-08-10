@@ -3,11 +3,13 @@
 import { useRef, useCallback, useEffect, useState, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { Subject } from 'rxjs';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
-import { Button, Space, Tooltip } from 'antd';
-import { PlusOutlined, CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled, SyncOutlined, SortAscendingOutlined } from '@ant-design/icons';
+import { Button, Space, Tooltip, message as antdMessage } from 'antd';
+import { PlusOutlined, CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled, SyncOutlined, SortAscendingOutlined, AlignLeftOutlined, BranchesOutlined } from '@ant-design/icons';
 import { useEditorStore } from '@/stores/editorStore';
 import MonacoEditor, { type MonacoEditorHandle } from '@/components/json-editor/MonacoEditor';
+import DuplicateKeysDrawer from '@/components/project/DuplicateKeysDrawer';
 import { flattenObject, getLeafPaths, determineInsertionPath, buildInsertEdit } from '@/lib/utils';
+import { findDuplicateKeys, type DuplicateGroup } from '@/lib/duplicate-keys';
 import type { SchemaUpdatedPayload } from '@/types/collaboration';
 import type { SchemaObject } from '@/types/schema';
 import type { editor } from 'monaco-editor';
@@ -92,6 +94,10 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
 
   // Schema 变更警告（用户编辑中时外部更新了数据）
   const [schemaChangeWarning, setSchemaChangeWarning] = useState(false);
+
+  // ---------- 重复键检测（按钮触发的一次性审计） ----------
+  const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
+  const [duplicateDrawerOpen, setDuplicateDrawerOpen] = useState(false);
 
   // 标记 store 变更是否由本用户的操作触发（阻止回写覆盖编辑器）
   const isSelfOriginatedChangeRef = useRef(false);
@@ -474,6 +480,66 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
     editorRef.current?.formatDocument();
   }, []);
 
+  // ---------- 重复键检测 ----------
+  // 检测输入是编辑器原文而非 store 已解析对象：store 落后一个 debounce 窗口
+  // （默认 1000ms），用 store 会让用户改完一秒内点按钮看到旧结果，
+  // 破坏「报告 = 屏幕内容」契约——按钮为此专门置灰，不该在数据源上放弃它。
+  const handleCheckDuplicates = useCallback(() => {
+    const text = editorRef.current?.getValue() ?? '';
+    const groups = findDuplicateKeys(text);
+
+    if (groups === null) {
+      // 兜底：正常情况下已被 disabled 拦住
+      antdMessage.error('JSON 格式错误，无法检测');
+      return;
+    }
+    if (groups.length === 0) {
+      antdMessage.success('未发现重复键');
+      return;
+    }
+
+    setDuplicateGroups(groups);
+    setDuplicateDrawerOpen(true);
+  }, []);
+
+  /** offset → 1-based 行号，供 Drawer 显示 L{n} */
+  const getLineNumber = useCallback((offset: number): number | null => {
+    const model = editorRef.current?.getEditor()?.getModel();
+    if (!model) return null;
+    // offset 在检测时刻记录；若用户此后编辑过，超出范围的 offset 会被
+    // Monaco 钳制到文档末尾，故显式判界返回 null 而不是给出错误行号
+    if (offset > model.getValueLength()) return null;
+    return model.getPositionAt(offset).lineNumber;
+  }, []);
+
+  /** 跳转到 offset 所在行：滚动居中 + 定位光标 + 短暂高亮该行 */
+  const handleJumpToOffset = useCallback((offset: number) => {
+    const editorInstance = editorRef.current?.getEditor();
+    const model = editorInstance?.getModel();
+    if (!editorInstance || !model) return;
+
+    const position = model.getPositionAt(offset);
+    editorInstance.revealLineInCenter(position.lineNumber);
+    editorInstance.setPosition(position);
+    editorInstance.focus();
+
+    // 临时高亮 1.5s：Drawer 不遮挡左栏，用户需要视觉锚点确认落点。
+    // 用 createDecorationsCollection（实例方法）而非 deltaDecorations（已弃用），
+    // 前者不需要 window.monaco 命名空间。
+    const decorations = editorInstance.createDecorationsCollection([
+      {
+        range: {
+          startLineNumber: position.lineNumber,
+          startColumn: 1,
+          endLineNumber: position.lineNumber,
+          endColumn: 1,
+        },
+        options: { isWholeLine: true, className: 'dup-key-flash' },
+      },
+    ]);
+    setTimeout(() => decorations.clear(), 1500);
+  }, []);
+
   const handleSort = useCallback(() => {
     sortAllKeys();
     const state = useEditorStore.getState();
@@ -524,25 +590,61 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
               添加键
             </Button>
           </Tooltip>
-          <Button
-            type="text"
-            size="small"
-            onClick={handleFormat}
-            style={{ color: '#ccc', fontSize: 12 }}
+
+          {/* 工具组：纯图标按钮，用略亮的色块背景与主操作区分，提高辨识度 */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+              padding: '0 4px',
+              borderRadius: 4,
+              background: '#2d2d30',
+              border: '1px solid #3a3a3c',
+            }}
           >
-            格式化
-          </Button>
-          <Tooltip title="将 Schema 和所有译文的 key 按字典序排序并保存">
-            <Button
-              type="text"
-              size="small"
-              icon={<SortAscendingOutlined />}
-              onClick={handleSort}
-              style={{ color: '#ccc' }}
+            <Tooltip title="格式化 JSON">
+              <Button
+                type="text"
+                size="small"
+                aria-label="格式化"
+                icon={<AlignLeftOutlined />}
+                onClick={handleFormat}
+                style={{ color: '#ccc' }}
+              />
+            </Tooltip>
+            <Tooltip title="将 Schema 和所有译文的 key 按字典序排序并保存">
+              <Button
+                type="text"
+                size="small"
+                aria-label="排序"
+                icon={<SortAscendingOutlined />}
+                onClick={handleSort}
+                style={{ color: '#ccc' }}
+              />
+            </Tooltip>
+            <Tooltip
+              title={
+                validationStatus === 'invalid'
+                  ? 'JSON 格式错误，请先修正后再检测'
+                  : '检测键名相同但路径不同的重复键'
+              }
             >
-              排序
-            </Button>
-          </Tooltip>
+              {/* 必须包一层 span：disabled 的 Button 不派发鼠标事件，
+                  Tooltip 直接包裹会导致悬停无提示 */}
+              <span style={{ display: 'inline-flex' }}>
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label="重复键检测"
+                  icon={<BranchesOutlined />}
+                  disabled={validationStatus === 'invalid'}
+                  onClick={handleCheckDuplicates}
+                  style={{ color: validationStatus === 'invalid' ? '#666' : '#ccc' }}
+                />
+              </span>
+            </Tooltip>
+          </div>
         </Space>
 
         {/* 保存状态 + JSON 校验指示器（右上角工具栏） */}
@@ -602,6 +704,15 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
           height="100%"
         />
       </div>
+
+      {/* 重复键检测结果抽屉 */}
+      <DuplicateKeysDrawer
+        open={duplicateDrawerOpen}
+        onClose={() => setDuplicateDrawerOpen(false)}
+        groups={duplicateGroups}
+        getLineNumber={getLineNumber}
+        onJumpTo={handleJumpToOffset}
+      />
     </div>
   );
 });
