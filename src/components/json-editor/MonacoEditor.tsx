@@ -90,6 +90,7 @@ function MonacoEditorComponent(
 
       // 滚动同步：使用 rAF 节流，计算滚动比例（0-1）
       let scrollRafId: number | null = null;
+      let prevScrollHeight = 0;
       editorInstance.onDidScrollChange(() => {
         if (scrollRafId !== null) return;
         if (isSyncingScrollRef.current) return;
@@ -97,6 +98,12 @@ function MonacoEditorComponent(
           scrollRafId = null;
           const scrollTop = editorInstance.getScrollTop();
           const scrollHeight = editorInstance.getScrollHeight();
+          // 当 scrollHeight 变化时（如 find widget 打开/关闭导致布局变化），
+          // 跳过滚动同步——这是布局变化而非用户滚动
+          if (scrollHeight !== prevScrollHeight) {
+            prevScrollHeight = scrollHeight;
+            return;
+          }
           const clientHeight = editorInstance.getLayoutInfo()?.height ?? 0;
           const maxScroll = Math.max(0, scrollHeight - clientHeight);
           const ratio = maxScroll > 0 ? scrollTop / maxScroll : 0;
@@ -212,6 +219,7 @@ function MonacoEditorComponent(
         onChange={handleChange}
         onMount={handleMount}
         options={mergedOptions}
+        className="relative"
         loading={
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999', background: '#1e1e1e' }}>
             <span>加载编辑器中...</span>

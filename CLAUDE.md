@@ -12,6 +12,8 @@ This file provides guidance to working with code in this repository.
 
 > **值变更实时同步已修复**（2026-08-10）。此前修改 key 对应的 value 时其他客户端不更新，根因是"改 value 时 `addedKeys`/`removedKeys` 均为空数组"同时触发三处阻塞：① `SchemaEditor` 广播前有键增删条件门；② 服务端唯一的 `schema:updated` 广播点位于 `syncSchemaChangesToLocales` 末尾，而该函数在无键变更时提前 return；③ `locale:save` → `updateLocale` 完全没有广播代码（译文从来不同步）。修复内容：去掉条件门、新增 `locale:updated` 事件对、`schema:save` 补时间戳 gate、时间戳单调校准、`MonacoEditor.setValue` 改最小编辑保留 undo 栈。详见核心架构决策 9-11。
 
+> **monaco-editor 0.56.1 升级追踪**（2026-08-11）。当前 `monaco-editor@0.56.0`（`@monaco-editor/react@4.7.0` 传递依赖）存在 `#5296`/`#5208` 查找框按钮 hover 闪烁 bug，根因是 ContextView 浮层锚定到错误的 containing block。上游修复 `#5442` 已并入 0.56.1 但**尚未发布**（npm latest 仍为 0.56.0，next dev tag 早于修复）。当前工作区：`src/app/globals.css` 中 `.relative > .context-view { pointer-events: none }` 打断闪烁循环，`src/components/json-editor/MonacoEditor.tsx` + `ImportPreviewDialog.tsx` 中 `className="relative"` 加固挂载容器定位。**0.56.1 发布后升级并移除以上 CSS 规则**。详见 `docs/bug/find-widget-hover-flicker.md`。
+
 ## Commands
 
 ```bash

@@ -125,6 +125,7 @@ export default function ImportPreviewDialog({
                       modified={diffData.newJson}
                       language="json"
                       theme="vs-dark"
+                      className="relative"
                       options={{
                         readOnly: true,
                         minimap: { enabled: false },

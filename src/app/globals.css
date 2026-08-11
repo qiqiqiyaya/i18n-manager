@@ -30,3 +30,18 @@ body {
 .dup-key-flash {
   background: rgba(255, 193, 7, 0.25);
 }
+
+/* 修复 monaco-editor 0.56.0 查找框按钮 hover 闪烁 bug
+   上游 #5296/#5442：浮层 .context-view 错位覆盖按钮 → hover 循环闪烁。
+   pointer-events: none 让浮层透传指针事件，打断"浮层出现→拦截指针→hover 消失→浮层消失→hover 出现"的循环。
+   浮层仍正常渲染，只是不抢事件。上游 0.56.1 发布后移除本规则。
+   见 docs/bug/find-widget-hover-flicker.md */
+.relative > .context-view {
+  pointer-events: none;
+}
+
+/* 修复 find widget close 按钮垂直对齐：Monaco 默认 top:5px 使 centerY=13px，
+   而同行 prev/next 按钮 centerY=16px，偏高 3px。调整为 top:8px 对齐。 */
+.monaco-editor .find-widget > .button.codicon-widget-close {
+  top: 8px !important;
+}
