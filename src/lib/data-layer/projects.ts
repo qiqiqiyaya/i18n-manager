@@ -123,7 +123,7 @@ export async function createProject(
  */
 export async function updateProject(
   projectId: string,
-  updates: { title?: string; description?: string }
+  updates: { title?: string; description?: string; referenceEnabled?: boolean }
 ): Promise<ProjectMeta> {
   const projectDir = getProjectDir(projectId);
   const metaPath = path.join(projectDir, 'meta.json');

@@ -1,7 +1,8 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
-import type { UpdatePayload, SchemaUpdatedPayload, SchemaSavePayload, LocaleSavePayload, LocaleUpdatedPayload } from '../types/collaboration';
+import type { UpdatePayload, SchemaUpdatedPayload, SchemaSavePayload, LocaleSavePayload, LocaleUpdatedPayload, ProjectSettingsPayload } from '../types/collaboration';
 import { updateSchema } from './data-layer/schema';
 import { updateLocale } from './data-layer/locales';
+import { updateProject } from './data-layer/projects';
 
 // 模块级 IO 实例，供 data-layer 等模块广播事件
 // 使用 globalThis 跨 Next.js 打包边界共享，因 API 路由会被 Next.js 重新打包为独立模块作用域
@@ -114,6 +115,20 @@ export function setupSocketHandlers(io: SocketIOServer): void {
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Locale 保存失败';
         socket.emit('locale:saved', { success: false, error: msg });
+        socket.emit('error', { message: msg });
+      }
+    });
+
+    // 项目级设置（如「速查」开关）：last-write-wins，写盘 + 广播到房间，同 locale:save 策略
+    socket.on('project:settings', async (data: ProjectSettingsPayload) => {
+      try {
+        await updateProject(data.projectId, { referenceEnabled: data.referenceEnabled });
+        io.to(roomName).emit('project:settings:updated', {
+          projectId: data.projectId,
+          referenceEnabled: data.referenceEnabled,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '项目设置保存失败';
         socket.emit('error', { message: msg });
       }
     });

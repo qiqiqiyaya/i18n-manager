@@ -3,14 +3,13 @@
 import { useRef, useCallback, useEffect, useState, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { Subject } from 'rxjs';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
-import { Alert, Popover, Tag, Typography } from 'antd';
+import { Alert } from 'antd';
 import type { editor } from 'monaco-editor';
 import { useEditorStore } from '@/stores/editorStore';
 import MonacoEditor, { type MonacoEditorHandle } from '@/components/json-editor/MonacoEditor';
-import { flattenObject } from '@/lib/utils';
+import { inferKeyPath, findKeyLine, computeEditorAnchor } from '@/lib/monaco-reveal';
+import type { ReferenceTokenPayload } from '@/types/reference';
 import type { TranslationObject } from '@/types/schema';
-
-const { Text } = Typography;
 
 /** 与自动保存防抖一致 */
 const PARSE_DEBOUNCE = parseInt(
@@ -18,23 +17,32 @@ const PARSE_DEBOUNCE = parseInt(
   10
 );
 
+/** 「速查」token 上报防抖（毫秒） */
+const REFERENCE_DEBOUNCE = 200;
+/** token 为选中文本时允许的最大长度（超出视为误选，不上报） */
+const MAX_TOKEN_LENGTH = 120;
+
 interface LocaleEditorProps {
   sendLocaleSave?: (lang: string, translations: TranslationObject) => void;
   /** 广播译文变更给其他客户端（timestamp/clientId 由 useSocket 内部注入） */
   sendLocaleUpdated?: (lang: string, translations: TranslationObject) => void;
   onScrollChange?: (ratio: number) => void;
+  /** 「速查」token 上报（选中/光标 → token + 屏幕锚点；null 表示当前位置无 token） */
+  onReferenceToken?: (payload: ReferenceTokenPayload | null) => void;
 }
 
-/** LocaleEditor 句柄：MonacoEditorHandle + flushSave（Ctrl+S 手动保存） */
-export type LocaleEditorHandle = MonacoEditorHandle & { flushSave: () => void };
+/** LocaleEditor 句柄：MonacoEditorHandle + flushSave（Ctrl+S 手动保存）+ revealKey（全局搜索跳转定位） */
+export type LocaleEditorHandle = MonacoEditorHandle & {
+  flushSave: () => void;
+  revealKey: (keyPath: string) => void;
+};
 
 const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
-  function LocaleEditor({ sendLocaleSave, sendLocaleUpdated, onScrollChange }, ref) {
+  function LocaleEditor({ sendLocaleSave, sendLocaleUpdated, onScrollChange, onReferenceToken }, ref) {
   const editorRef = useRef<MonacoEditorHandle>(null);
 
   const activeLang = useEditorStore((s) => s.activeLang);
   const openLocales = useEditorStore((s) => s.openLocales);
-  const schema = useEditorStore((s) => s.schema);
   const updateTranslation = useEditorStore((s) => s.updateTranslation);
 
   // 编辑器本地文本管理
@@ -61,12 +69,10 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
   const openLocalesRef = useRef(openLocales);
   openLocalesRef.current = openLocales;
 
-  // 翻译参考浮层状态
-  const [referenceKey, setReferenceKey] = useState<string | null>(null);
-  const [referenceVisible, setReferenceVisible] = useState(false);
-
   // Schema 变更警告（用户编辑中时外部更新了数据）
   const [schemaChangeWarning, setSchemaChangeWarning] = useState(false);
+  // 「速查」token 上报防抖 Subject
+  const referenceSubjectRef = useRef<Subject<void> | null>(null);
 
   // ---------- 辅助：从 store 同步内容到 Monaco 编辑器 ----------
   // 序列化 → setEditorText → setValue（带 programmatic flag 防止误触发 onChange）
@@ -197,7 +203,7 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
     parseLogic(text);
   }, [activeLang, parseLogic]);
 
-  // 向外暴露内部 editorRef（同步滚动）+ flushSave（手动保存）
+  // 向外暴露内部 editorRef（同步滚动）+ flushSave（手动保存）+ revealKey（全局搜索跳转定位）
   useImperativeHandle(ref, () => ({
     getValue: () => editorRef.current?.getValue() ?? '',
     setValue: (value: string) => editorRef.current?.setValue(value),
@@ -208,6 +214,17 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
     getCursorPosition: () => editorRef.current?.getCursorPosition() ?? null,
     scrollToRatio: (ratio: number) => editorRef.current?.scrollToRatio(ratio),
     flushSave,
+    // 定位到指定点分键路径所在行并聚焦；行未找到（目标语言编辑中、store 与编辑器文本不一致）→ 静默跳过，由页面层 find 兜底
+    revealKey: (keyPath: string) => {
+      const editorInstance = editorRef.current?.getEditor();
+      const model = editorInstance?.getModel();
+      if (!editorInstance || !model) return;
+      const line = findKeyLine(model, keyPath);
+      if (line === null) return;
+      editorInstance.revealLineInCenter(line);
+      editorInstance.setPosition({ lineNumber: line, column: 1 });
+      editorInstance.focus();
+    },
   }), [flushSave]);
 
   // 建立 RxJS Subject + 防抖订阅
@@ -274,86 +291,62 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
     }
   }, []); // 空依赖：全部通过 ref 读取最新值
 
-  // ---------- 推断光标位置的完整键路径 ----------
-  // 支持嵌套结构：向上扫描以更浅缩进开启对象且包裹当前键的父级，拼出点分路径
-  // 例：{"a": {"b": "x"}} 光标在 "b" 行 → 返回 "a.b"
-  const inferKeyPath = useCallback((model: editor.ITextModel, lineNumber: number): string | null => {
-    const currentLine = model.getLineContent(lineNumber);
-    const keyMatch = currentLine.match(/^\s*"([^"]+)"\s*:/);
-    if (!keyMatch) return null;
+  // ---------- 「速查」token 上报 ----------
+  // 选中非空 → 用选中文本查；无选中 → 光标落在键行则用键路径查（Q1-C 退化触发）。
+  // 防抖 + 编辑中/程序写入/光标抑制，避免打字、滚动、外部同步时反复触发。
+  const emitReference = useCallback(() => {
+    if (isEditingRef.current || isProgrammaticChangeRef.current || suppressCursorRef.current) return;
+    const editorInstance = editorRef.current?.getEditor();
+    const model = editorInstance?.getModel();
+    if (!editorInstance || !model || !activeLang) return;
 
-    const path: string[] = [keyMatch[1]];
-    const currentIndent = (currentLine.match(/^\s*/)?.[0] ?? '').length;
-    let parentIndent = currentIndent;
+    const sel = editorInstance.getSelection();
+    let token: string | null = null;
+    let position = editorInstance.getPosition();
 
-    // 向上扫描寻找父级键（缩进更浅、且开启对象包裹当前键）
-    for (let i = lineNumber - 1; i >= 1; i--) {
-      const line = model.getLineContent(i);
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      const indent = (line.match(/^\s*/)?.[0] ?? '').length;
-      if (indent >= parentIndent) continue;
-
-      const parentMatch = line.match(/^\s*"([^"]+)"\s*:\s*\{/);
-      if (parentMatch) {
-        path.unshift(parentMatch[1]);
-        parentIndent = indent;
+    if (sel && !sel.isEmpty()) {
+      const text = model.getValueInRange(sel).trim();
+      if (text.length > 0 && text.length <= MAX_TOKEN_LENGTH) {
+        token = text;
+        position = sel.getStartPosition();
       }
+    } else if (position) {
+      const keyPath = inferKeyPath(model, position.lineNumber);
+      if (keyPath) token = keyPath;
     }
 
-    return path.join('.');
-  }, []);
-
-  const handleCursorPosition = useCallback(() => {
-    if (suppressCursorRef.current) return;
-    const editor = editorRef.current?.getEditor();
-    if (!editor || !activeLang) return;
-
-    const position = editor.getPosition();
-    if (!position) return;
-
-    const model = editor.getModel();
-    if (!model) return;
-
-    const key = inferKeyPath(model, position.lineNumber);
-    if (key) {
-      setReferenceKey(key);
-      setReferenceVisible(true);
+    if (token && position) {
+      onReferenceToken?.({ token, anchor: computeEditorAnchor(editorInstance, position) });
     } else {
-      setReferenceVisible(false);
+      onReferenceToken?.(null);
     }
-  }, [activeLang, inferKeyPath]);
+  }, [activeLang, onReferenceToken]);
+
+  useEffect(() => {
+    const subject = new Subject<void>();
+    referenceSubjectRef.current = subject;
+    const subscription = subject.pipe(debounceTime(REFERENCE_DEBOUNCE)).subscribe(() => {
+      emitReference();
+    });
+    return () => {
+      subscription.unsubscribe();
+      referenceSubjectRef.current = null;
+    };
+  }, [emitReference]);
 
   // ---------- Monaco 编辑器挂载时注册事件监听 ----------
   // 稳定引用：配合 MonacoEditor 的 React.memo 防止不必要的重渲染级联
   const handleEditorMount = useCallback((editorInstance: editor.IStandaloneCodeEditor) => {
+    editorInstance.onDidChangeCursorSelection(() => {
+      referenceSubjectRef.current?.next();
+    });
     editorInstance.onDidChangeCursorPosition(() => {
-      handleCursorPosition();
+      referenceSubjectRef.current?.next();
     });
     editorInstance.onDidBlurEditorText(() => {
       handleBlur();
     });
-  }, [handleCursorPosition, handleBlur]);
-
-  // ---------- 翻译参考数据 ----------
-  const getReferenceData = useCallback(() => {
-    if (!referenceKey) return null;
-
-    const schemaFlat = flattenObject(schema);
-    const description = schemaFlat[referenceKey] || '';
-
-    const otherTranslations: Array<{ lang: string; value: string }> = [];
-    for (const [lang, translations] of Object.entries(openLocales)) {
-      if (lang === activeLang) continue;
-      const flat = flattenObject(translations);
-      if (referenceKey in flat) {
-        otherTranslations.push({ lang, value: String(flat[referenceKey]) });
-      }
-    }
-
-    return { key: referenceKey, description, otherTranslations };
-  }, [referenceKey, schema, openLocales, activeLang]);
+  }, [handleBlur]);
 
   // ---------- 空状态 ----------
   if (!activeLang) {
@@ -366,37 +359,6 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
       </div>
     );
   }
-
-  const referenceData = getReferenceData();
-
-  const referenceContent = referenceData ? (
-    <div style={{ maxWidth: 400, fontSize: 13 }}>
-      <div style={{ marginBottom: 8 }}>
-        <Text strong style={{ fontSize: 13 }}>键名：</Text>
-        <Text code style={{ fontSize: 12 }}>{referenceData.key}</Text>
-      </div>
-      {referenceData.description && (
-        <div style={{ marginBottom: 8 }}>
-          <Text strong style={{ fontSize: 13 }}>说明：</Text>
-          <Text style={{ fontSize: 12 }}>{referenceData.description}</Text>
-        </div>
-      )}
-      {referenceData.otherTranslations.length > 0 && (
-        <div>
-          <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 4 }}>其他语言译文：</Text>
-          {referenceData.otherTranslations.map((t) => (
-            <div key={t.lang} style={{ marginBottom: 4 }}>
-              <Tag style={{ fontSize: 11 }}>{t.lang}</Tag>
-              <Text style={{ fontSize: 12 }}>{t.value}</Text>
-            </div>
-          ))}
-        </div>
-      )}
-      {referenceData.otherTranslations.length === 0 && (
-        <Text type="secondary" style={{ fontSize: 12 }}>其他语言中暂无此键的译文</Text>
-      )}
-    </div>
-  ) : null;
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
@@ -425,27 +387,18 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
         )}
       </div>
 
-      {/* 翻译参考 + 编辑器 */}
+      {/* 编辑器（「速查」浮层由 page.tsx 统一挂载） */}
       <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
-        <Popover
-          content={referenceContent}
-          open={referenceVisible && !!referenceData}
-          onOpenChange={setReferenceVisible}
-          placement="rightTop"
-          trigger={['click']}
-          title="翻译参考"
-        >
-          <div style={{ height: '100%' }} onClick={handleCursorPosition}>
-            <MonacoEditor
-              ref={editorRef}
-              value={editorText}
-              onChange={handleChange}
-              height="100%"
-              onEditorMount={handleEditorMount}
-              onScrollChange={onScrollChange}
-            />
-          </div>
-        </Popover>
+        <div style={{ height: '100%' }}>
+          <MonacoEditor
+            ref={editorRef}
+            value={editorText}
+            onChange={handleChange}
+            height="100%"
+            onEditorMount={handleEditorMount}
+            onScrollChange={onScrollChange}
+          />
+        </div>
       </div>
     </div>
   );

@@ -37,6 +37,7 @@ export function useSocket({ projectId }: UseSocketOptions) {
   const applyLocaleSync = useEditorStore((s) => s.applyLocaleSync);
   const setTranslation = useEditorStore((s) => s.setTranslation);
   const setSaveStatus = useEditorStore((s) => s.setSaveStatus);
+  const setReferenceEnabled = useEditorStore((s) => s.setReferenceEnabled);
 
   // ---- 保存状态流（RxJS）----
   // savingStart$: saving 开始时发出时间戳
@@ -155,6 +156,11 @@ export function useSocket({ projectId }: UseSocketOptions) {
       saveResult$.next(data);
     });
 
+    // 项目级设置变更（如「速查」开关，其他客户端广播），last-write-wins
+    socket.on('project:settings:updated', (data: { projectId: string; referenceEnabled: boolean }) => {
+      setReferenceEnabled(data.referenceEnabled);
+    });
+
     return () => {
       socket.disconnect();
       socketRef.current = null;
@@ -211,5 +217,10 @@ export function useSocket({ projectId }: UseSocketOptions) {
     });
   };
 
-  return { socket: socketRef.current, socketId, sendUpdate, sendSchemaUpdated, sendSchemaSave, sendLocaleUpdated, sendLocaleSave };
+  // 项目级设置（如「速查」开关）变更：emit 后由服务端写盘 + 广播（last-write-wins）
+  const sendProjectSettings = (referenceEnabled: boolean) => {
+    socketRef.current?.emit('project:settings', { projectId, referenceEnabled });
+  };
+
+  return { socket: socketRef.current, socketId, sendUpdate, sendSchemaUpdated, sendSchemaSave, sendLocaleUpdated, sendLocaleSave, sendProjectSettings };
 }

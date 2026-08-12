@@ -9,8 +9,10 @@ import { useEditorStore } from '@/stores/editorStore';
 import MonacoEditor, { type MonacoEditorHandle } from '@/components/json-editor/MonacoEditor';
 import DuplicateKeysDrawer from '@/components/project/DuplicateKeysDrawer';
 import { flattenObject, getLeafPaths, determineInsertionPath, buildInsertEdit } from '@/lib/utils';
+import { inferKeyPath, findKeyLine, computeEditorAnchor } from '@/lib/monaco-reveal';
 import { findDuplicateKeys, type DuplicateGroup } from '@/lib/duplicate-keys';
 import type { SchemaUpdatedPayload } from '@/types/collaboration';
+import type { ReferenceTokenPayload } from '@/types/reference';
 import type { SchemaObject } from '@/types/schema';
 import type { editor } from 'monaco-editor';
 
@@ -19,6 +21,11 @@ const PARSE_DEBOUNCE = parseInt(
   process.env.NEXT_PUBLIC_AUTO_SAVE_DEBOUNCE || '1000',
   10
 );
+
+/** 「速查」token 上报防抖（毫秒） */
+const REFERENCE_DEBOUNCE = 200;
+/** token 为选中文本时允许的最大长度（超出视为误选，不上报） */
+const MAX_TOKEN_LENGTH = 120;
 
 /**
  * 启发式重命名检测：如果删除的键和新增的键前缀相同但最后一个分段不同，视为重命名
@@ -51,13 +58,18 @@ interface SchemaEditorProps {
   ) => void;
   sendSchemaSave?: (data: { schema: SchemaObject; addedKeys: string[]; removedKeys: string[] }) => void;
   onScrollChange?: (ratio: number) => void;
+  /** 「速查」token 上报（选中/光标 → token + 屏幕锚点；null 表示当前位置无 token） */
+  onReferenceToken?: (payload: ReferenceTokenPayload | null) => void;
 }
 
-/** SchemaEditor 句柄：MonacoEditorHandle + flushSave（Ctrl+S 手动保存） */
-export type SchemaEditorHandle = MonacoEditorHandle & { flushSave: () => void };
+/** SchemaEditor 句柄：MonacoEditorHandle + flushSave（Ctrl+S 手动保存）+ revealKey（速查跳转定位） */
+export type SchemaEditorHandle = MonacoEditorHandle & {
+  flushSave: () => void;
+  revealKey: (keyPath: string) => void;
+};
 
 const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
-  function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, onScrollChange }, ref) {
+  function SchemaEditor({ sendSchemaUpdated, sendSchemaSave, onScrollChange, onReferenceToken }, ref) {
   const editorRef = useRef<MonacoEditorHandle>(null);
 
   const schema = useEditorStore((s) => s.schema);
@@ -91,6 +103,8 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
   schemaRef.current = schema;
   const openLocalesRef = useRef(openLocales);
   openLocalesRef.current = openLocales;
+  // 「速查」token 上报防抖 Subject
+  const referenceSubjectRef = useRef<Subject<void> | null>(null);
 
   // Schema 变更警告（用户编辑中时外部更新了数据）
   const [schemaChangeWarning, setSchemaChangeWarning] = useState(false);
@@ -251,7 +265,50 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
     parseLogic(text);
   }, [parseLogic]);
 
-  // 向外暴露内部 editorRef（同步滚动）+ flushSave（手动保存）
+  // ---------- 「速查」token 上报 ----------
+  // 选中非空 → 用选中文本查；无选中 → 光标落在键行则用键路径查（Q1-C 退化触发）。
+  // 防抖 + 编辑中/程序写入抑制，避免打字、滚动时反复触发。
+  const emitReference = useCallback(() => {
+    if (isEditingRef.current || isProgrammaticChangeRef.current) return;
+    const editorInstance = editorRef.current?.getEditor();
+    const model = editorInstance?.getModel();
+    if (!editorInstance || !model) return;
+
+    const sel = editorInstance.getSelection();
+    let token: string | null = null;
+    let position = editorInstance.getPosition();
+
+    if (sel && !sel.isEmpty()) {
+      const text = model.getValueInRange(sel).trim();
+      if (text.length > 0 && text.length <= MAX_TOKEN_LENGTH) {
+        token = text;
+        position = sel.getStartPosition();
+      }
+    } else if (position) {
+      const keyPath = inferKeyPath(model, position.lineNumber);
+      if (keyPath) token = keyPath;
+    }
+
+    if (token && position) {
+      onReferenceToken?.({ token, anchor: computeEditorAnchor(editorInstance, position) });
+    } else {
+      onReferenceToken?.(null);
+    }
+  }, [onReferenceToken]);
+
+  useEffect(() => {
+    const subject = new Subject<void>();
+    referenceSubjectRef.current = subject;
+    const subscription = subject.pipe(debounceTime(REFERENCE_DEBOUNCE)).subscribe(() => {
+      emitReference();
+    });
+    return () => {
+      subscription.unsubscribe();
+      referenceSubjectRef.current = null;
+    };
+  }, [emitReference]);
+
+  // 向外暴露内部 editorRef（同步滚动）+ flushSave（手动保存）+ revealKey（速查跳转定位）
   useImperativeHandle(ref, () => ({
     getValue: () => editorRef.current?.getValue() ?? '',
     setValue: (value: string) => editorRef.current?.setValue(value),
@@ -262,6 +319,17 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
     getCursorPosition: () => editorRef.current?.getCursorPosition() ?? null,
     scrollToRatio: (ratio: number) => editorRef.current?.scrollToRatio(ratio),
     flushSave,
+    // 定位到指定点分键路径所在行并聚焦；行未找到 → 静默跳过
+    revealKey: (keyPath: string) => {
+      const editorInstance = editorRef.current?.getEditor();
+      const model = editorInstance?.getModel();
+      if (!editorInstance || !model) return;
+      const line = findKeyLine(model, keyPath);
+      if (line === null) return;
+      editorInstance.revealLineInCenter(line);
+      editorInstance.setPosition({ lineNumber: line, column: 1 });
+      editorInstance.focus();
+    },
   }), [flushSave]);
 
   // 建立 RxJS Subject + 防抖订阅
@@ -331,6 +399,13 @@ const SchemaEditor = forwardRef<SchemaEditorHandle, SchemaEditorProps>(
     }
     editorInstance.onDidBlurEditorText(() => {
       handleBlur();
+    });
+    // 「速查」token 上报：选中/光标变化 → 防抖后计算 token + 锚点
+    editorInstance.onDidChangeCursorSelection(() => {
+      referenceSubjectRef.current?.next();
+    });
+    editorInstance.onDidChangeCursorPosition(() => {
+      referenceSubjectRef.current?.next();
     });
   }, [handleBlur]);
 

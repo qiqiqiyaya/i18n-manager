@@ -30,6 +30,7 @@ export const createProjectSchema = z.object({
 export const updateProjectSchema = z.object({
   title: projectTitleSchema.optional(),
   description: projectDescriptionSchema,
+  referenceEnabled: z.boolean().optional(),
 });
 
 /**

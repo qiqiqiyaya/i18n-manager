@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 
-interface SearchResult {
+export interface SearchResult {
   lang: string;
   key: string;
   value: string;

@@ -55,6 +55,13 @@ describe('editorStore', () => {
       expect(useEditorStore.getState().saveStatus).toBe('saving');
     });
 
+    it('setReferenceEnabled', () => {
+      useEditorStore.getState().setReferenceEnabled(false);
+      expect(useEditorStore.getState().referenceEnabled).toBe(false);
+      useEditorStore.getState().setReferenceEnabled(true);
+      expect(useEditorStore.getState().referenceEnabled).toBe(true);
+    });
+
     it('reset restores initial state', () => {
       useEditorStore.getState().setProjectId('test');
       useEditorStore.getState().reset();

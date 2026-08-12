@@ -74,7 +74,18 @@ export type SocketEvent =
   | 'locale:updated'
   | 'locale:save'
   | 'locale:saved'
-  | 'locale:synced';
+  | 'locale:synced'
+  | 'project:settings'
+  | 'project:settings:updated';
+
+/**
+ * 项目级设置变更载荷（如「速查」开关）。
+ * last-write-wins：不做时间戳冲突检测，同 locale:save 策略
+ */
+export interface ProjectSettingsPayload {
+  projectId: string;
+  referenceEnabled: boolean;
+}
 
 /**
  * 服务端 Socket 事件载荷

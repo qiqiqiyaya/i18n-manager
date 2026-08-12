@@ -23,6 +23,11 @@ export default defineConfig({
         'src/hooks/useSearch.ts',
         'src/components/common/SearchHighlight.tsx',
         'src/lib/data-layer/io.ts',
+        'src/lib/monaco-reveal.ts',
+        'src/components/project/GlobalSearchResults.tsx',
+        'src/lib/reference-lookup.ts',
+        'src/lib/reference-state.ts',
+        'src/components/project/CrossReferencePopover.tsx',
       ],
       thresholds: {
         statements: 99,

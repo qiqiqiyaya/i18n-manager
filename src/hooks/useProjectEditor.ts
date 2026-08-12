@@ -12,6 +12,7 @@ interface UseProjectEditorOptions {
 export function useProjectEditor({ projectId }: UseProjectEditorOptions) {
   const setProjectId = useEditorStore((s) => s.setProjectId);
   const setProjectTitle = useEditorStore((s) => s.setProjectTitle);
+  const setReferenceEnabled = useEditorStore((s) => s.setReferenceEnabled);
   const setAvailableLocales = useEditorStore((s) => s.setAvailableLocales);
   const setSchema = useEditorStore((s) => s.setSchema);
   const setOpenLocales = useEditorStore((s) => s.setOpenLocales);
@@ -28,6 +29,7 @@ export function useProjectEditor({ projectId }: UseProjectEditorOptions) {
       const { meta, schema: schemaData, locales } = res.data.data;
       setProjectId(projectId);
       setProjectTitle(meta?.title || '');
+      setReferenceEnabled(meta?.referenceEnabled ?? true);
       setAvailableLocales(locales || []);
       setSchema(schemaData || {});
 
@@ -51,7 +53,7 @@ export function useProjectEditor({ projectId }: UseProjectEditorOptions) {
     } finally {
       setIsLoading(false);
     }
-  }, [projectId, setProjectId, setProjectTitle, setAvailableLocales, setSchema, setOpenLocales, setActiveLang, setIsLoading, setIsDirty]);
+  }, [projectId, setProjectId, setProjectTitle, setReferenceEnabled, setAvailableLocales, setSchema, setOpenLocales, setActiveLang, setIsLoading, setIsDirty]);
 
   // 初始加载
   useEffect(() => {

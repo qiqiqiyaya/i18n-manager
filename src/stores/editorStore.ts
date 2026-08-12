@@ -17,10 +17,13 @@ interface EditorState {
   isLoading: boolean;
   saveStatus: SaveStatus;
   saveError: string | null;
+  /** 每项目「速查」开关（缺省视为 true） */
+  referenceEnabled: boolean;
 
   setProjectId: (id: string) => void;
   setProjectTitle: (title: string) => void;
   setAvailableLocales: (locales: string[]) => void;
+  setReferenceEnabled: (enabled: boolean) => void;
   setSchema: (schema: SchemaObject) => void;
   updateSchema: (schema: SchemaObject) => void;
   setOpenLocales: (locales: Record<string, TranslationObject>) => void;
@@ -49,6 +52,7 @@ const initialState = {
   isLoading: false,
   saveStatus: 'idle' as SaveStatus,
   saveError: null as string | null,
+  referenceEnabled: true,
 };
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -57,6 +61,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   setProjectId: (projectId) => set({ projectId }),
   setProjectTitle: (projectTitle) => set({ projectTitle }),
   setAvailableLocales: (availableLocales) => set({ availableLocales }),
+  setReferenceEnabled: (enabled) => set({ referenceEnabled: enabled }),
   setSchema: (schema) => set({ schema }),
   updateSchema: (schema) => set({ schema, isDirty: true, saveStatus: 'dirty' }),
   setOpenLocales: (locales) =>
