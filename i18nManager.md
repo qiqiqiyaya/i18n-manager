@@ -64,7 +64,7 @@
 
 **搜索能力**：
 - **编辑器内搜索**：在当前编辑器内容中按键名或说明搜索，自动展开并高亮匹配节点。
-- **全局跨语言搜索**：在编辑器顶部提供独立搜索框，支持**按译文内容**在当前项目的所有已添加语言文件中检索，结果以列表形式呈现。
+- **项目内译文搜索**：在编辑器顶部提供独立搜索框，支持**按译文内容**在当前项目的所有已添加语言文件中检索，结果以列表形式呈现。
 
 **输入辅助（翻译参考）**：
 - 当用户编辑某个键的译文时，系统应弹出浮层（悬浮卡片），显示该键在其他已添加语言中的译文，以及键名和说明，辅助翻译一致性。
@@ -213,7 +213,7 @@ project-root/
     ├── hooks/                    # 自定义 Hooks
     │   ├── useSocket.ts          # Socket.IO 连接管理（schema:updated/schema:save/locale:save + 保存状态流）
     │   ├── useProjectEditor.ts   # 项目加载 + beforeunload 未保存提示
-    │   └── useSearch.ts          # 全局跨语言搜索（遍历 openLocales 匹配译文内容）
+    │   └── useSearch.ts          # 项目内译文搜索（遍历 openLocales 匹配译文内容）
     │
     ├── stores/                   # Zustand stores
     │   ├── editorStore.ts        # 编辑状态（schema/openLocales/activeLang/isDirty/saveStatus/saveError + applyLocaleSync/reconcileSchemaInLocales）
@@ -441,7 +441,7 @@ export const GET = withApiHandler(async (req, { params }) => {
 #### 6.2.1 整体布局
 主编辑器页面（`/projects/[id]`）采用**左右两栏布局**，两侧均使用 Monaco Editor 作为 JSON 代码编辑器。
 
-- **顶部工具栏**：位于左右两栏上方，包含项目标题、**全局跨语言搜索框**（按译文内容在当前项目的所有语言文件中检索）、在线人数徽标，以及导入/导出操作按钮。
+- **顶部工具栏**：位于左右两栏上方，包含项目标题、**项目内译文搜索框**（按译文内容在当前项目的所有语言文件中检索）、在线人数徽标，以及导入/导出操作按钮。
 - **左栏（宽度占比 50%）**：
   - 顶部为工具栏（"添加键"按钮 + "格式化"按钮 + 保存状态/JSON 校验指示器）。
   - 下方嵌入 Monaco Editor，展示当前项目的完整 Schema（**格式化的 JSON 对象**，支持嵌套结构）。
@@ -487,7 +487,7 @@ const DEFAULT_OPTIONS = {
 
 #### 6.2.5 搜索与高亮
 - **编辑器内搜索**：调用 Monaco 的 `editor.getAction('actions.find')` 触发查找对话框，支持正则、大小写敏感等标准功能。
-- **全局跨语言搜索**（按译文内容）：
+- **项目内译文搜索**（按译文内容）：
   - 在顶部工具栏提供独立搜索输入框，用户输入关键词后，系统**遍历当前项目下的所有已打开语言文件**（`openLocales`），递归匹配译文内容（字符串 `includes` 匹配）。
   - 匹配结果以列表形式展示（包含语言、键路径、译文片段），点击结果项时：
     - 切换到对应语言 Tab；

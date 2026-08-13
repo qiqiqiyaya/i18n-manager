@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useReducer, use, useRef, useMemo } from 'react';
-import { Button, Space, Spin, Input, Popover, Tooltip } from 'antd';
+import { Button, Space, Spin, Input, Popover, Tooltip, type InputRef } from 'antd';
 import { ArrowLeftOutlined, ImportOutlined, ExportOutlined, SearchOutlined, EyeOutlined } from '@ant-design/icons';
 import { Subject } from 'rxjs';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
@@ -18,15 +18,23 @@ import LanguageTabs from '@/components/project/LanguageTabs';
 import OnlineBadge from '@/components/collaboration/OnlineBadge';
 import ImportPreviewDialog from '@/components/project/ImportPreviewDialog';
 import ExportSelectorDialog from '@/components/project/ExportSelectorDialog';
-import GlobalSearchResults from '@/components/project/GlobalSearchResults';
+import TranslationSearchResults from '@/components/project/TranslationSearchResults';
 import CrossReferencePopover from '@/components/project/CrossReferencePopover';
 import LocaleStatusBar from '@/components/project/LocaleStatusBar';
 import { lookupToken } from '@/lib/reference-lookup';
 import { referenceReducer, initialState } from '@/lib/reference-state';
+import {
+  searchPopoverReducer,
+  initialState as searchPopoverInitialState,
+  isSearchPopoverOpen,
+  classifySearchRegion,
+} from '@/lib/search-popover-state';
 import type { ReferenceTokenPayload } from '@/types/reference';
 
-/** 全局搜索防抖延迟（毫秒），与首页项目搜索一致 */
+/** 项目内译文搜索防抖延迟（毫秒），与首页项目搜索一致 */
 const SEARCH_DEBOUNCE = 300;
+/** 译文搜索弹出层鼠标移出组合区域后的关闭延迟（毫秒） */
+const SEARCH_CLOSE_DELAY = 400;
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -50,7 +58,6 @@ export default function ProjectEditorPage({ params }: Props) {
   const referenceEnabled = useEditorStore((s) => s.referenceEnabled);
   const setReferenceEnabled = useEditorStore((s) => s.setReferenceEnabled);
   const setActiveLang = useEditorStore((s) => s.setActiveLang);
-  const openLocale = useEditorStore((s) => s.openLocale);
   const overwrittenMessage = useCollaborationStore((s) => s.overwrittenMessage);
   const setOverwrittenMessage = useCollaborationStore((s) => s.setOverwrittenMessage);
 
@@ -59,8 +66,13 @@ export default function ProjectEditorPage({ params }: Props) {
   const localeEditorRef = useRef<LocaleEditorHandle>(null);
   const scrollRatioRef = useRef<number>(0);
   const isScrollingRef = useRef(false);
-  // 全局搜索防抖 Subject
+  // 项目内译文搜索防抖 Subject
   const searchSubjectRef = useRef<Subject<string> | null>(null);
+  // 译文搜索弹出层状态机 + 关闭延时定时器（Q1-A 组合区域鼠标移出关闭）
+  const [searchPopover, dispatchSearchPopover] = useReducer(searchPopoverReducer, searchPopoverInitialState);
+  const searchCloseTimerRef = useRef<number | null>(null);
+  const searchInputRef = useRef<InputRef | null>(null);
+  const searchPopupRef = useRef<HTMLDivElement | null>(null);
 
   // 「速查」浮层状态（hidden ⇄ expanded ⇄ collapsed）+ hover 桥接引用
   const [referenceState, dispatchReference] = useReducer(referenceReducer, initialState);
@@ -88,7 +100,7 @@ export default function ProjectEditorPage({ params }: Props) {
     dispatchReference({ type: 'SCROLL' });
   }, []);
 
-  // 全局搜索防抖：输入 → Subject → debounceTime → setKeyword 驱动 useSearch 重算 results
+  // 项目内译文搜索防抖：输入 → Subject → debounceTime → setKeyword 驱动 useSearch 重算 results
   useEffect(() => {
     const subject = new Subject<string>();
     searchSubjectRef.current = subject;
@@ -106,7 +118,80 @@ export default function ProjectEditorPage({ params }: Props) {
     };
   }, [setKeyword]);
 
+  // ---------- 译文搜索弹出层：鼠标移出组合区域自动关闭（Q1-A/Q2-A/Q3-A） ----------
+  const cancelSearchClose = useCallback(() => {
+    if (searchCloseTimerRef.current !== null) {
+      window.clearTimeout(searchCloseTimerRef.current);
+      searchCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleSearchClose = useCallback(() => {
+    if (searchCloseTimerRef.current !== null) return;
+    searchCloseTimerRef.current = window.setTimeout(() => {
+      searchCloseTimerRef.current = null;
+      dispatchSearchPopover({ type: 'DISMISS' });
+    }, SEARCH_CLOSE_DELAY);
+  }, []);
+
+  // mousemove 桥接（三态，Q1-A）：输入框上悬停 → 取消关闭 + REOPEN（悬停即显示）；
+  // 弹出层上悬停 → 仅取消关闭（保持展开，不 REOPEN——避免点击跳转时弹出层卸载瞬间、
+  // 鼠标停在旧位置触发重开导致闪烁）；两者之外 → 延迟 SEARCH_CLOSE_DELAY 后收起
+  useEffect(() => {
+    if (!searchPopover.hasText) return;
+    const BRIDGE = 16;
+    const handleMove = (e: MouseEvent) => {
+      const region = classifySearchRegion(
+        e.clientX,
+        e.clientY,
+        searchInputRef.current?.nativeElement?.getBoundingClientRect() ?? null,
+        searchPopupRef.current?.getBoundingClientRect() ?? null,
+        BRIDGE
+      );
+      if (region === 'outside') { scheduleSearchClose(); return; }
+      cancelSearchClose();
+      if (region === 'input') dispatchSearchPopover({ type: 'REOPEN' });
+    };
+    document.addEventListener('mousemove', handleMove);
+    return () => document.removeEventListener('mousemove', handleMove);
+  }, [searchPopover.hasText, cancelSearchClose, scheduleSearchClose]);
+
+  // Esc 键：仅在焦点位于搜索输入框/弹出层内时立即收起（Q3-A；不劫持 Monaco find 的 Esc）
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !searchPopover.hasText) return;
+      const active = document.activeElement;
+      const inside =
+        (searchInputRef.current?.nativeElement?.contains(active) ?? false) ||
+        (searchPopupRef.current?.contains(active) ?? false);
+      if (inside) {
+        cancelSearchClose();
+        dispatchSearchPopover({ type: 'DISMISS' });
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [searchPopover.hasText, cancelSearchClose]);
+
+  // 点击输入框外部：立即收起（Q3-A）
+  useEffect(() => {
+    if (!searchPopover.hasText) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const inside =
+        (searchInputRef.current?.nativeElement?.contains(target) ?? false) ||
+        (searchPopupRef.current?.contains(target) ?? false);
+      if (!inside) {
+        cancelSearchClose();
+        dispatchSearchPopover({ type: 'DISMISS' });
+      }
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [searchPopover.hasText, cancelSearchClose]);
+
   // 点击搜索结果：切语言 Tab → 等 Monaco 同步到目标语言后精确 reveal + 打开 find 高亮该语言内全部匹配
+  // 跳转后保留输入内容与搜索结果，仅关闭弹出层（Q1-A）；悬停/聚焦可再弹出同一批结果（Q2-A）
   const handleSearchSelect = useCallback((result: SearchResult) => {
     const keywordAtClick = searchInput;
     setActiveLang(result.lang);
@@ -114,9 +199,9 @@ export default function ProjectEditorPage({ params }: Props) {
       localeEditorRef.current?.revealKey(result.key);
       localeEditorRef.current?.find(keywordAtClick);
     });
-    setSearchInput('');
-    setKeyword('');
-  }, [setActiveLang, searchInput, setKeyword]);
+    dispatchSearchPopover({ type: 'DISMISS' });
+    cancelSearchClose();
+  }, [setActiveLang, searchInput, cancelSearchClose]);
 
   // ---------- 「速查」：查询、跳转、复制、hover 桥接、开关 ----------
   const referenceLookup = useMemo(() => {
@@ -245,16 +330,32 @@ export default function ProjectEditorPage({ params }: Props) {
         <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => router.push('/')} />
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{projectTitle || '编辑器'}</h2>
         <Popover
-          open={searchInput.trim().length > 0}
+          open={isSearchPopoverOpen(searchPopover)}
           trigger={[]}
           placement="bottomLeft"
           content={
-            <GlobalSearchResults results={results} keyword={keyword} onSelect={handleSearchSelect} />
+            <div ref={searchPopupRef}>
+              <TranslationSearchResults results={results} keyword={keyword} onSelect={handleSearchSelect} />
+            </div>
           }
         >
-          <Input placeholder="搜索译文内容..." prefix={<SearchOutlined />}
+          <Input ref={searchInputRef} placeholder="搜索译文内容..." prefix={<SearchOutlined />}
             value={searchInput}
-            onChange={(e) => { setSearchInput(e.target.value); searchSubjectRef.current?.next(e.target.value); }}
+            onChange={(e) => {
+              setSearchInput(e.target.value);
+              dispatchSearchPopover({ type: 'SET_TEXT', hasText: e.target.value.trim().length > 0 });
+              searchSubjectRef.current?.next(e.target.value);
+            }}
+            onFocus={() => dispatchSearchPopover({ type: 'REOPEN' })}
+            onBlur={(e) => {
+              // 焦点移到弹出层内（如点击结果按钮）不算移出；否则立即收起
+              const next = e.relatedTarget as Node | null;
+              const insidePopup = next != null && (searchPopupRef.current?.contains(next) ?? false);
+              if (!insidePopup) {
+                cancelSearchClose();
+                dispatchSearchPopover({ type: 'DISMISS' });
+              }
+            }}
             allowClear style={{ maxWidth: 300, marginLeft: 'auto' }} />
         </Popover>
         <Tooltip title={referenceEnabled ? '关闭速查（指向/选中键值即查）' : '开启速查（指向/选中键值即查）'}>

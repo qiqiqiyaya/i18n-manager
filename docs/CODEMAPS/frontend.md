@@ -32,7 +32,7 @@ ProjectEditorPage (Client, uses useProjectEditor + useSocket hooks)
 ├── Top Bar
 │   ├── Back Button (ArrowLeftOutlined, navigate to /)
 │   ├── Project Title (loaded from API)
-│   ├── Global Search Input (placeholder, keyword state)
+│   ├── Translation Search Input (placeholder, keyword state)
 │   ├── OnlineBadge (collaborationStore.onlineCount)
 │   ├── Import Button (opens ImportPreviewDialog)
 │   └── Export Button (opens ExportSelectorDialog)

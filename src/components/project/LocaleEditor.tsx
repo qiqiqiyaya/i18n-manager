@@ -31,7 +31,7 @@ interface LocaleEditorProps {
   onReferenceToken?: (payload: ReferenceTokenPayload | null) => void;
 }
 
-/** LocaleEditor 句柄：MonacoEditorHandle + flushSave（Ctrl+S 手动保存）+ revealKey（全局搜索跳转定位） */
+/** LocaleEditor 句柄：MonacoEditorHandle + flushSave（Ctrl+S 手动保存）+ revealKey（项目内译文搜索跳转定位） */
 export type LocaleEditorHandle = MonacoEditorHandle & {
   flushSave: () => void;
   revealKey: (keyPath: string) => void;
@@ -203,7 +203,7 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
     parseLogic(text);
   }, [activeLang, parseLogic]);
 
-  // 向外暴露内部 editorRef（同步滚动）+ flushSave（手动保存）+ revealKey（全局搜索跳转定位）
+  // 向外暴露内部 editorRef（同步滚动）+ flushSave（手动保存）+ revealKey（项目内译文搜索跳转定位）
   useImperativeHandle(ref, () => ({
     getValue: () => editorRef.current?.getValue() ?? '',
     setValue: (value: string) => editorRef.current?.setValue(value),

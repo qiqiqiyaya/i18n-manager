@@ -125,7 +125,7 @@ project-root/
 │   ├── hooks/
 │   │   ├── useSocket.ts          # Socket.IO 连接管理（update/schema:updated/schema:save/locale:save + 保存状态 RxJS 流）
 │   │   ├── useProjectEditor.ts   # 项目加载 + beforeunload 未保存提示
-│   │   └── useSearch.ts          # 全局跨语言搜索（遍历 openLocales 匹配译文内容）
+│   │   └── useSearch.ts          # 项目内译文搜索（遍历 openLocales 匹配译文内容）
 │   ├── stores/
 │   │   ├── editorStore.ts        # Zustand 编辑状态（schema/openLocales/activeLang/isDirty + applyLocaleSync 含 renameMap + setTranslation 远端更新不置 dirty）
 │   │   └── collaborationStore.ts # 协作状态（onlineCount / overwrittenMessage / reset）

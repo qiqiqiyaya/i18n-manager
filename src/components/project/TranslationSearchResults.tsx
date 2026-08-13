@@ -4,18 +4,18 @@ import { Tag, Empty } from 'antd';
 import SearchHighlight from '@/components/common/SearchHighlight';
 import type { SearchResult } from '@/hooks/useSearch';
 
-interface GlobalSearchResultsProps {
+interface TranslationSearchResultsProps {
   results: SearchResult[];
   keyword: string;
   onSelect: (result: SearchResult) => void;
 }
 
-/** 全局跨语言搜索的下拉结果列表：语言 Tag + 键路径 + 高亮值，点击回调 */
-export default function GlobalSearchResults({
+/** 项目内译文搜索的下拉结果列表：语言 Tag + 键路径 + 高亮值，点击回调 */
+export default function TranslationSearchResults({
   results,
   keyword,
   onSelect,
-}: GlobalSearchResultsProps) {
+}: TranslationSearchResultsProps) {
   if (results.length === 0) {
     return (
       <div style={{ minWidth: 320, padding: '12px 0' }}>

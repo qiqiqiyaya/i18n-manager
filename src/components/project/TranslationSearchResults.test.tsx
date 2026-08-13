@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import GlobalSearchResults from './GlobalSearchResults';
+import TranslationSearchResults from './TranslationSearchResults';
 import type { SearchResult } from '@/hooks/useSearch';
 
 const results: SearchResult[] = [
@@ -9,9 +9,9 @@ const results: SearchResult[] = [
   { lang: 'en-US', key: 'app.title', value: 'Login' },
 ];
 
-describe('GlobalSearchResults', () => {
+describe('TranslationSearchResults', () => {
   it('renders lang tag, key path, and value for each result', () => {
-    render(<GlobalSearchResults results={results} keyword="" onSelect={vi.fn()} />);
+    render(<TranslationSearchResults results={results} keyword="" onSelect={vi.fn()} />);
 
     expect(screen.getByText('zh-CN')).toBeInTheDocument();
     expect(screen.getByText('en-US')).toBeInTheDocument();
@@ -22,7 +22,7 @@ describe('GlobalSearchResults', () => {
 
   it('highlights keyword matches in values', () => {
     const { container } = render(
-      <GlobalSearchResults results={results} keyword="Log" onSelect={vi.fn()} />
+      <TranslationSearchResults results={results} keyword="Log" onSelect={vi.fn()} />
     );
 
     const marks = container.querySelectorAll('mark');
@@ -33,7 +33,7 @@ describe('GlobalSearchResults', () => {
   });
 
   it('shows empty state when no results match', () => {
-    render(<GlobalSearchResults results={[]} keyword="xyz" onSelect={vi.fn()} />);
+    render(<TranslationSearchResults results={[]} keyword="xyz" onSelect={vi.fn()} />);
 
     expect(screen.getByText('无匹配结果')).toBeInTheDocument();
   });
@@ -41,7 +41,7 @@ describe('GlobalSearchResults', () => {
   it('calls onSelect with the clicked result', async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
-    render(<GlobalSearchResults results={[results[0]]} keyword="" onSelect={onSelect} />);
+    render(<TranslationSearchResults results={[results[0]]} keyword="" onSelect={onSelect} />);
 
     await user.click(screen.getByRole('button', { name: /zh-CN/ }));
 
