@@ -11,16 +11,17 @@
 
 | 决策 | 结论 |
 |---|---|
-| 触发 | 选中优先 → 无选中退化光标 token；RxJS 防抖 ~200ms + 非编辑中 + 命中才弹 |
+| 触发 | **仅选中触发（Q1-A，2026-08-13）**：双击选词/鼠标拖选/Shift+方向键选词等非空 selection 才弹；无选中（单击/光标移动/点击空白）一律关闭。已移除原「无选中退化光标 token」逻辑，避免"点到哪里就用哪里的 key 重新弹出"。RxJS 防抖 ~200ms + 非编辑中 + 命中才弹 |
 | 旧浮层 | 合并取代 `LocaleEditor` 现有「翻译参考」Popover，两栏通用 |
 | 匹配 | 双向命中（键路径/末段/值包含），精确优先 |
 | 定位 | 锚定 token（portal 渲染，滚动/布局重算） |
 | 滚动折叠 | 滚动时缩成**屏幕固定小标记**（显示键名），悬停恢复完整弹层 |
 | 跳转 | Schema 命中 → 主表；译文命中 → 译文栏（自动切语言 Tab + revealKey）；目标语言未打开自动打开 |
 | 复制 | 每行复制按钮 + 双击弹层内值复制 + Tooltip 提示 + 复制成功反馈 |
-| 关闭 | 三态 + 桥接（移入弹层取消关闭；离开双区 + 间隙 400ms 关） |
+| 关闭 | 三态 + 桥接（移入弹层取消关闭；离开双区 + 间隙 400ms 关）+ **点击「源编辑器 + 浮层/标记」之外立即关闭（Q2-A，2026-08-13）** |
 | 开关 | `ProjectMeta.referenceEnabled`（默认 true）+ `project:settings` Socket 广播 last-write-wins + 顶部工具栏按钮 |
-| 展示 | 无匹配不弹；命中分「Schema」「译文（按语言分组）」两段；>6 条显示"还有 N 条…"，弹层内滚动 |
+| 展示 | 无匹配不弹；命中分「Schema」「译文（按语言分组）」两段；**全部命中直接渲染，弹层内滚动（Q2-A，2026-08-14：移除原「>6 条折叠 + 还有 N 条…」，改 `maxHeight 320 + overflowY auto` 出滚动条）** |
+| 宽度 | **内容自适应（Q1-A，2026-08-14）**：面板 `width: max-content` + `min-width 300`，钳制 `max-width: min(520, 视口-2*MARGIN)`；行内 value/desc 的 flex 省略号 span 补 `minWidth: 0` 修复溢出根因，key 列 `maxWidth 160` 截断防长 key 撑爆 |
 | 状态机 | `hidden ⇄ expanded ⇄ collapsed`，纯 reducer 可单测 |
 
 ## 架构
@@ -51,7 +52,8 @@ translationHits: 各语言扁平化后 (lang, key, value)：
 | `HOVER_MARKER` | collapsed → expanded（重锚定，越界钳制） |
 | `ENTER_POPOVER` | 取消 pending close，保持 expanded |
 | `LEAVE_ALL`（离开 编辑器+弹层+标记，经桥接） | 400ms 后 → hidden（collapsed 时标记一起消失） |
-| `TOKEN_MISS`（无匹配） | → hidden（不弹） |
+| `CLICK_OUTSIDE`（点击「源编辑器 + 浮层/标记」之外，Q2-A） | 立即 → hidden（不等 400ms） |
+| `TOKEN_MISS`（无匹配 / 无选中，Q1-A） | → hidden（不弹） |
 
 ### 每项目开关（Block A）
 

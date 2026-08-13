@@ -7,7 +7,7 @@ import { Alert } from 'antd';
 import type { editor } from 'monaco-editor';
 import { useEditorStore } from '@/stores/editorStore';
 import MonacoEditor, { type MonacoEditorHandle } from '@/components/json-editor/MonacoEditor';
-import { inferKeyPath, findKeyLine, computeEditorAnchor } from '@/lib/monaco-reveal';
+import { findKeyLine, computeEditorAnchor } from '@/lib/monaco-reveal';
 import type { ReferenceTokenPayload } from '@/types/reference';
 import type { TranslationObject } from '@/types/schema';
 
@@ -27,7 +27,7 @@ interface LocaleEditorProps {
   /** 广播译文变更给其他客户端（timestamp/clientId 由 useSocket 内部注入） */
   sendLocaleUpdated?: (lang: string, translations: TranslationObject) => void;
   onScrollChange?: (ratio: number) => void;
-  /** 「速查」token 上报（选中/光标 → token + 屏幕锚点；null 表示当前位置无 token） */
+  /** 「速查」token 上报（选中 → token + 屏幕锚点；无选中/点击空白 → null 关闭） */
   onReferenceToken?: (payload: ReferenceTokenPayload | null) => void;
 }
 
@@ -292,8 +292,9 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
   }, []); // 空依赖：全部通过 ref 读取最新值
 
   // ---------- 「速查」token 上报 ----------
-  // 选中非空 → 用选中文本查；无选中 → 光标落在键行则用键路径查（Q1-C 退化触发）。
-  // 防抖 + 编辑中/程序写入/光标抑制，避免打字、滚动、外部同步时反复触发。
+  // 仅选中触发（Q1-A）：双击选词/鼠标拖选/Shift+方向键选词等非空 selection 才上报 token；
+  // 无选中（单击/光标移动/点击空白）一律上报 null → MISS 关闭。不再退化用光标所在键路径，
+  // 避免"点到哪里就用哪里的 key 重新弹出"。防抖 + 编辑中/程序写入/光标抑制避免反复触发。
   const emitReference = useCallback(() => {
     if (isEditingRef.current || isProgrammaticChangeRef.current || suppressCursorRef.current) return;
     const editorInstance = editorRef.current?.getEditor();
@@ -310,9 +311,6 @@ const LocaleEditor = forwardRef<LocaleEditorHandle, LocaleEditorProps>(
         token = text;
         position = sel.getStartPosition();
       }
-    } else if (position) {
-      const keyPath = inferKeyPath(model, position.lineNumber);
-      if (keyPath) token = keyPath;
     }
 
     if (token && position) {

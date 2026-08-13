@@ -91,7 +91,7 @@ describe('CrossReferencePopover', () => {
     expect(BASE.onCopy).toHaveBeenCalledWith('Login');
   });
 
-  it('folds when more than 6 hits: shows remaining count', () => {
+  it('renders all hits without folding when more than 6 (Q2-A: scroll instead of fold)', () => {
     const many = {
       ...LOOKUP,
       translationHits: Array.from({ length: 8 }, (_, i) => ({
@@ -99,7 +99,10 @@ describe('CrossReferencePopover', () => {
       })),
     };
     render(<CrossReferencePopover {...BASE} lookup={many} />);
-    expect(screen.getByText(/还有 3 条/)).toBeInTheDocument();
+    // 全部命中直接渲染，无「还有 N 条…」折叠提示
+    expect(screen.getByText('k7')).toBeInTheDocument();
+    expect(screen.getByText('v7')).toBeInTheDocument();
+    expect(screen.queryByText(/还有/)).not.toBeInTheDocument();
   });
 
   it('renders collapsed marker instead of popover content', () => {
@@ -140,8 +143,24 @@ describe('CrossReferencePopover', () => {
       <CrossReferencePopover {...BASE} anchor={{ x: 5000, y: 5000 }} />
     );
     const popover = container.querySelector('[data-role="reference-popover"]') as HTMLElement;
-    // left 钳制到 innerWidth - PANEL_WIDTH - MARGIN；top 空间不足翻到锚点上方
-    expect(parseInt(popover.style.left, 10)).toBe(window.innerWidth - 340 - 8);
+    // left 按最大宽度 PANEL_MAX_WIDTH 钳制到 innerWidth - PANEL_MAX_WIDTH - MARGIN；top 空间不足翻到锚点上方
+    expect(parseInt(popover.style.left, 10)).toBe(window.innerWidth - 520 - 8);
     expect(parseInt(popover.style.top, 10)).toBe(5000 - 320 - 14);
+  });
+
+  it('sizes panel to content with viewport max-width clamp (Q1-A)', () => {
+    const { container } = render(<CrossReferencePopover {...BASE} />);
+    const popover = container.querySelector('[data-role="reference-popover"]') as HTMLElement;
+    // width: max-content + min-width 300，max-width 取 min(520, 视口-2*MARGIN)；视口 1024 时即 520
+    expect(popover.style.width).toBe('max-content');
+    expect(popover.style.minWidth).toBe('300px');
+    expect(popover.style.maxWidth).toBe('520px');
+  });
+
+  it('scrolls when content overflows instead of folding (Q2-A)', () => {
+    const { container } = render(<CrossReferencePopover {...BASE} />);
+    const popover = container.querySelector('[data-role="reference-popover"]') as HTMLElement;
+    expect(popover.style.maxHeight).toBe('320px');
+    expect(popover.style.overflowY).toBe('auto');
   });
 });

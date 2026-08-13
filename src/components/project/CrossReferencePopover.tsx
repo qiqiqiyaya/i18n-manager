@@ -4,17 +4,20 @@ import { useState } from 'react';
 import { Tag, Typography } from 'antd';
 import { CopyOutlined, ArrowRightOutlined } from '@ant-design/icons';
 import SearchHighlight from '@/components/common/SearchHighlight';
-import type { LookupResult, SchemaHit, TranslationHit } from '@/lib/reference-lookup';
+import type { LookupResult, TranslationHit } from '@/lib/reference-lookup';
 
 const { Text } = Typography;
 
-/** 展开态浮层与折叠态标记的最大尺寸（用于视口钳制） */
-const PANEL_WIDTH = 340;
+/** 展开态浮层与折叠态标记的尺寸（用于视口钳制） */
+/** 面板最小宽度（内容过短时也不窄于此） */
+const PANEL_MIN_WIDTH = 300;
+/** 面板最大宽度（视口足够时上限） */
+const PANEL_MAX_WIDTH = 520;
 const PANEL_HEIGHT = 320;
 const GAP = 14;
 const MARGIN = 8;
-/** 超过该条数折叠，显示"还有 N 条…" */
-const MAX_VISIBLE = 6;
+/** key 文本在行内的最大宽度（超出省略号截断，防止长 key 撑爆面板） */
+const KEY_MAX_WIDTH = 160;
 
 interface CrossReferencePopoverProps {
   mode: 'expanded' | 'collapsed';
@@ -32,17 +35,7 @@ interface CrossReferencePopoverProps {
   onLeave: () => void;
 }
 
-type DisplayItem =
-  | { kind: 'schema'; hit: SchemaHit }
-  | { kind: 'translation'; hit: TranslationHit };
-
-/** 把命中折叠到可见数量内，返回可见项与隐藏数量 */
-function foldItems(items: DisplayItem[]): { visible: DisplayItem[]; hiddenCount: number } {
-  if (items.length <= MAX_VISIBLE) return { visible: items, hiddenCount: 0 };
-  return { visible: items.slice(0, MAX_VISIBLE), hiddenCount: items.length - MAX_VISIBLE };
-}
-
-/** 按语言分组译文命中（保持首次出现顺序），供分组展示；输入须为已过滤的译文项 */
+/** 按语言分组译文命中（保持首次出现顺序），供分组展示 */
 function groupByLang(
   hits: Array<{ kind: 'translation'; hit: TranslationHit }>
 ): Array<{ lang: string; items: Array<{ kind: 'translation'; hit: TranslationHit }> }> {
@@ -77,17 +70,11 @@ export default function CrossReferencePopover({
 }: CrossReferencePopoverProps) {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  const items: DisplayItem[] = [
-    ...lookup.schemaHits.map((hit) => ({ kind: 'schema' as const, hit })),
-    ...lookup.translationHits.map((hit) => ({ kind: 'translation' as const, hit })),
-  ];
+  if (lookup.schemaHits.length === 0 && lookup.translationHits.length === 0) return null;
 
-  if (items.length === 0) return null;
-
-  const { visible, hiddenCount } = foldItems(items);
-  const visibleSchema = visible.filter((i) => i.kind === 'schema');
-  const visibleTranslation = visible.filter((i) => i.kind === 'translation');
-  const langGroups = groupByLang(visibleTranslation);
+  const langGroups = groupByLang(
+    lookup.translationHits.map((hit) => ({ kind: 'translation' as const, hit }))
+  );
 
   const handleCopy = (text: string, keyLabel: string) => {
     onCopy(text);
@@ -95,8 +82,10 @@ export default function CrossReferencePopover({
     setTimeout(() => setCopiedKey((k) => (k === keyLabel ? null : k)), 1200);
   };
 
-  // 视口钳制：优先锚点下方，空间不足则翻到上方
-  const left = Math.min(Math.max(MARGIN, anchor.x), Math.max(MARGIN, window.innerWidth - PANEL_WIDTH - MARGIN));
+  // 宽度：内容自适应（max-content），min 300 / max min(520, 视口-2*MARGIN) 钳制。
+  // 视口钳制：按最大宽度推算 left，保证面板不溢出右边界；top 空间不足翻到上方。
+  const maxWidth = Math.min(PANEL_MAX_WIDTH, window.innerWidth - 2 * MARGIN);
+  const left = Math.min(Math.max(MARGIN, anchor.x), Math.max(MARGIN, window.innerWidth - maxWidth - MARGIN));
   const top =
     anchor.y + GAP + PANEL_HEIGHT < window.innerHeight
       ? anchor.y + GAP
@@ -147,7 +136,9 @@ export default function CrossReferencePopover({
         left,
         top,
         zIndex: 1000,
-        width: PANEL_WIDTH,
+        width: 'max-content',
+        minWidth: PANEL_MIN_WIDTH,
+        maxWidth,
         maxHeight: PANEL_HEIGHT,
         overflowY: 'auto',
         background: '#fff',
@@ -163,16 +154,17 @@ export default function CrossReferencePopover({
         <Text code style={{ fontSize: 12 }}>{token}</Text>
       </div>
 
-      {visibleSchema.length > 0 && (
+      {lookup.schemaHits.length > 0 && (
         <div style={{ padding: '0 4px' }}>
           <div style={{ padding: '2px 8px', color: '#888', fontSize: 12 }}>Schema</div>
-          {visibleSchema.map((item) => {
-            const hit = (item as { hit: SchemaHit }).hit;
+          {lookup.schemaHits.map((hit) => {
             const label = `复制 ${hit.key}`;
             return (
               <div key={`schema.${hit.key}`} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px' }}>
-                <code style={{ flexShrink: 0, color: '#333', fontSize: 12 }}><SearchHighlight text={hit.key} keyword={token} /></code>
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#666', fontSize: 12 }}>
+                <code style={{ flexShrink: 0, maxWidth: KEY_MAX_WIDTH, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#333', fontSize: 12 }}>
+                  <SearchHighlight text={hit.key} keyword={token} />
+                </code>
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#666', fontSize: 12 }}>
                   <SearchHighlight text={hit.description} keyword={token} />
                 </span>
                 <button type="button" aria-label={label} title={label}
@@ -197,14 +189,14 @@ export default function CrossReferencePopover({
           {langGroups.map(({ lang, items: groupItems }) => (
             <div key={lang}>
               {groupItems.map((item) => {
-                const hit = (item as { hit: TranslationHit }).hit;
+                const hit = item.hit;
                 const label = `复制 ${lang} ${hit.key}`;
                 return (
                   <div key={`${lang}.${hit.key}`} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 8px' }}>
                     <Tag style={{ flexShrink: 0, marginRight: 0, fontSize: 11 }}>{lang}</Tag>
-                    <code style={{ flexShrink: 0, color: '#999', fontSize: 11 }}>{hit.key}</code>
+                    <code style={{ flexShrink: 0, maxWidth: KEY_MAX_WIDTH, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#999', fontSize: 11 }}>{hit.key}</code>
                     <span title="双击复制" onDoubleClick={() => handleCopy(hit.value, label)}
-                      style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#333', cursor: 'default' }}>
+                      style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#333', cursor: 'default' }}>
                       <SearchHighlight text={hit.value} keyword={token} />
                     </span>
                     <button type="button" aria-label={label} title={label}
@@ -222,12 +214,6 @@ export default function CrossReferencePopover({
               })}
             </div>
           ))}
-        </div>
-      )}
-
-      {hiddenCount > 0 && (
-        <div style={{ padding: '4px 12px', color: '#999', fontSize: 12, textAlign: 'center', borderTop: '1px solid #f5f5f5', marginTop: 4 }}>
-          还有 {hiddenCount} 条…
         </div>
       )}
     </div>

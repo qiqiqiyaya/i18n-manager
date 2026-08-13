@@ -287,6 +287,28 @@ export default function ProjectEditorPage({ params }: Props) {
     return () => document.removeEventListener('mousemove', handleMove);
   }, [referenceState.mode, referenceState.token, cancelClose, scheduleClose]);
 
+  // 点击「源编辑器 + 浮层/标记」之外 → 立即关闭（Q2-A）。编辑器内点击空白因选中消失
+  // 走 emitReference → MISS 关闭；此处兜底编辑器外的工具栏、另一栏、页面空白点击，
+  // 不再"点到哪里就用哪里的 key 重新弹出"。
+  useEffect(() => {
+    if (referenceState.mode === 'hidden') return;
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const editorNode = (referenceState.token?.source === 'schema'
+        ? schemaEditorRef.current?.getEditor()?.getDomNode()
+        : localeEditorRef.current?.getEditor()?.getDomNode());
+      const inside =
+        (editorNode?.contains(target) ?? false) ||
+        (popoverRef.current?.contains(target) ?? false);
+      if (!inside) {
+        cancelClose();
+        dispatchReference({ type: 'CLOSE' });
+      }
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [referenceState.mode, referenceState.token, cancelClose]);
+
   // 每项目「速查」开关：本地 store + Socket 广播（last-write-wins），关闭时浮层完全抑制
   const handleToggleReference = useCallback(() => {
     const next = !useEditorStore.getState().referenceEnabled;
