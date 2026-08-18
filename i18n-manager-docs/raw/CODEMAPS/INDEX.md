@@ -10,11 +10,11 @@ i18n Manager is a lightweight, collaborative multilingual translation management
 
 | Document | Area | Description |
 |---|---|---|
-| [architecture.md](./architecture.md) | System | High-level architecture, data flow, key decisions, entry points |
-| [frontend.md](./frontend.md) | Client | Pages, components, hooks, stores, data flow, third-party libraries |
-| [backend.md](./backend.md) | Server | API routes, data layer, Socket.IO events, validation, response envelope |
-| [data.md](./data.md) | Persistence | File structure, type definitions, transform pipeline, concurrency guarantees |
-| [dependencies.md](./dependencies.md) | External | Runtime/dev dependencies, environment variables, version notes |
+| [architecture.md](architecture.md) | System | High-level architecture, data flow, key decisions, entry points |
+| [frontend.md](frontend.md) | Client | Pages, components, hooks, stores, data flow, third-party libraries |
+| [backend.md](backend.md) | Server | API routes, data layer, Socket.IO events, validation, response envelope |
+| [data.md](data.md) | Persistence | File structure, type definitions, transform pipeline, concurrency guarantees |
+| [dependencies.md](dependencies.md) | External | Runtime/dev dependencies, environment variables, version notes |
 
 ## Quick Reference
 
@@ -39,5 +39,5 @@ i18n Manager is a lightweight, collaborative multilingual translation management
 - [`CLAUDE.md`](../../CLAUDE.md) — AI agent working guide
 - [`AGENTS.md`](../../AGENTS.md) — Per-agent project guidance
 - [`i18nManager.md`](../../i18nManager.md) — Full requirements and technical constraints
-- [`docs/CONTRIBUTING.md`](../CONTRIBUTING.md) — Development guide
-- [`docs/RUNBOOK.md`](../RUNBOOK.md) — Deployment and operations
+- [`docs/CONTRIBUTING.md`](CONTRIBUTING.md) — Development guide
+- [`docs/RUNBOOK.md`](RUNBOOK.md) — Deployment and operations

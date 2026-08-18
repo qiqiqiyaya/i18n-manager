@@ -208,6 +208,6 @@ schema:rejected → setSchema from acceptedData + overwrittenMessage (5s auto-cl
 
 ## Related Areas
 
-- [Architecture Codemap](./architecture.md)
-- [Backend Codemap](./backend.md)
-- [Data Codemap](./data.md)
+- [Architecture Codemap](architecture.md)
+- [Backend Codemap](backend.md)
+- [Data Codemap](data.md)

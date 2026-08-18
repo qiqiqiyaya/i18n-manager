@@ -105,6 +105,6 @@ Requires read/write access to:
 
 ## Related Areas
 
-- [Architecture Codemap](./architecture.md)
-- [Backend Codemap](./backend.md)
-- [Data Codemap](./data.md)
+- [Architecture Codemap](architecture.md)
+- [Backend Codemap](backend.md)
+- [Data Codemap](data.md)

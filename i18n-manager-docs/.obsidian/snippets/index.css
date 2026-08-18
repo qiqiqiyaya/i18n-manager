@@ -1,0 +1,434 @@
+/* 浅色模式 */
+.theme-light {
+  /* 所有标题颜色改为黑色 */
+  --h1-color: #000000;
+  --h2-color: #000000;
+  --h3-color: #000000;
+  --h4-color: #000000;
+  --h5-color: #000000;
+  --h6-color: #000000;
+
+  /* list 相关样式 */
+  --list-spacing: 0.3rem;
+  --list-marker-color: #696969;
+  /* 表格颜色交替 */
+  --table-row-alt-background: #f8f8f8;
+  /* 代码块颜色 - 增强对比度 */
+  --code-normal: #333333;
+  --code-background: #f0f0f0;
+  /* 链接颜色 */
+  --link-external-color: #4183c4;
+  /* 导航栏及大纲样式逻辑 */
+  --folder-weight: 600; /* 各级标题（对应文件夹）加粗 */
+  --folder-color: #000000; /* 标题默认黑色 */
+  --file-weight: 500; /* 普通内容不加粗（大纲中主要针对标题） */
+  --file-color: #555555;
+  --current-file-weight: 700; /* 当前激活标题额外加粗 */
+  --current-file-color: #165DFF; /* 当前激活标题蓝色 */
+  --nav-active-bg: #ffff4d; /* 当前项背景亮黄色 */
+  --nav-active-color: #165DFF;
+  /* 导航栏图标颜色 */
+  --nav-collapse-icon-color: #444;
+  --nav-collapse-icon-color-collapsed: #222;
+  /* 引用 */
+  --blockquote-border-thickness: 4px;
+  --blockquote-border-color: rgb(223, 226, 229);
+  /* 选中文字的背景色 */
+  --text-selection: #7CA4EB;
+  /* 亮度调整 */
+  filter: brightness(95%);
+  /* inline 代码块 - 增强显示 */
+  --inline-code-bg: #e8e8e8;
+  --inline-code-border: #d0d0d0;
+}
+
+/* 深色模式下的调整 */
+.theme-dark {
+  /* 所有标题颜色改为白色 */
+  --h1-color: #ffffff;
+  --h2-color: #ffffff;
+  --h3-color: #ffffff;
+  --h4-color: #ffffff;
+  --h5-color: #ffffff;
+  --h6-color: #ffffff;
+
+  /* list 相关样式 */
+  --list-spacing: 0.3rem;
+  --list-marker-color: #E0FFFF;
+  /* 表格颜色交替 */
+  --table-row-alt-background: #363636;
+  /* 代码块颜色 - 增强对比度 */
+  --code-normal: #e0e0e0;
+  --code-background: #2d2d2d;
+  /* 链接颜色 */
+  --link-external-color: #6ccda4;
+  /* 导航栏及大纲样式逻辑 */
+  --folder-weight: 600; /* 各级标题加粗 */
+  --folder-color: #ffffff; /* 标题默认白色 */
+  --file-weight: 500; /* 普通内容不加粗 */
+  --file-color: #bbbbbb;
+  --current-file-weight: 700; /* 当前激活标题额外加粗 */
+  --current-file-color: #7CB3FF; /* 当前激活标题蓝色 */
+  --nav-active-bg: #ffff4d; /* 当前项背景亮黄色 */
+  --nav-active-color: #7CB3FF;
+  /* 导航栏图标颜色 */
+  --nav-collapse-icon-color: #aaa;
+  --nav-collapse-icon-color-collapsed: #ddd;
+  /* 引用 */
+  --blockquote-border-thickness: 4px;
+  --blockquote-border-color: #444;
+  /* 选中文字的背景色 */
+  --text-selection: #7CA4EB;
+  /* 亮度调整 */
+  filter: brightness(80%);
+  /* inline 代码块 - 增强显示 */
+  --inline-code-bg: #3d3d3d;
+  --inline-code-border: #4a4a4a;
+}
+
+/* 统一设置 inline 代码块样式 */
+span.cm-inline-code {
+  background-color: var(--inline-code-bg) !important;
+  border: 1px solid var(--inline-code-border) !important;
+  padding: 0 4px !important;
+  border-radius: 3px !important;
+}
+
+/* quiet-outline */
+.quiet-outline .n-tree-node-content {
+  font-weight: 500;
+}
+
+/* 标题基础样式（导航栏逻辑同步：所有标题加粗） */
+.HyperMD-header {
+  padding-bottom: 0.4rem !important;
+  font-weight: var(--folder-weight) !important; /* 编辑模式标题加粗 */
+}
+
+/* 一级标题额外增加加粗效果 */
+.HyperMD-header-1, .inline-title[data-level='1'], .HyperMD-list-line .cm-header-1,
+h1, .markdown-rendered h1 {
+  font-weight: 700 !important;
+}
+
+/* 阅读模式大纲（标题层级）同步导航栏逻辑 */
+/* 1. 所有标题加粗（对应文件夹加粗） */
+.markdown-rendered h1,
+.markdown-rendered h2,
+.markdown-rendered h3,
+.markdown-rendered h4,
+.markdown-rendered h5,
+.markdown-rendered h6 {
+  font-weight: var(--folder-weight) !important;
+  color: var(--folder-color) !important;
+}
+
+/* 2. 当前激活的标题（对应导航栏当前选中项）突出显示 */
+.markdown-rendered h1.is-active,
+.markdown-rendered h2.is-active,
+.markdown-rendered h3.is-active,
+.markdown-rendered h4.is-active,
+.markdown-rendered h5.is-active,
+.markdown-rendered h6.is-active {
+  font-weight: var(--current-file-weight) !important;
+  color: var(--current-file-color) !important;
+  background-color: var(--nav-active-bg) !important;
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important;
+  border-radius: 3px !important;
+}
+
+/* 3. 大纲面板（目录）同步样式 */
+.outline-item {
+  font-weight: var(--folder-weight) !important; /* 大纲目录项加粗 */
+}
+
+.outline-item.is-active {
+  font-weight: var(--current-file-weight) !important;
+  color: var(--current-file-color) !important;
+  background-color: var(--nav-active-bg) !important;
+  border-radius: 3px !important;
+}
+
+/* 引用 */
+.HyperMD-quote {
+  color: #666;
+  opacity: 0.9;
+}
+
+/* 隐藏链接图片 */
+.external-link {
+  padding-right: 0;
+  background-size: 0;
+}
+
+/* 代码块样式增强 - 移除行间距 */
+.HyperMD-codeblock {
+  tab-size: 4;
+  padding: 1rem !important;
+  border-radius: 4px !important;
+  font-weight: 500 !important;
+  line-height: 1.3 !important;
+  margin-bottom: 1rem !important;
+}
+
+/* 确保代码块内每行之间没有额外间距 */
+.cm-line.HyperMD-codeblock {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  min-height: auto !important;
+}
+
+/* 代码块文字颜色 */
+.cm-s-obsidian .cm-keyword { color: #0066cc !important; }
+.cm-s-obsidian .cm-def { color: #cc0000 !important; }
+.cm-s-obsidian .cm-variable { color: var(--code-normal) !important; }
+.cm-s-obsidian .cm-string { color: #008000 !important; }
+.cm-s-obsidian .cm-comment { color: #6a9955 !important; opacity: 0.9; }
+
+/* list 行首添加空白 */
+.HyperMD-list-line > .cm-formatting-list + span:before {
+  content: '  ';
+}
+
+/* list 相关样式 */
+.markdown-source-view.mod-cm6 :is(.HyperMD-list-line-1, .HyperMD-list-line-5) .list-bullet:after {
+  height: 5.5px;
+  width: 5.5px;
+  border-radius: 50%;
+  background-color: var(--list-marker-color);
+}
+
+.markdown-source-view.mod-cm6 :is(.HyperMD-list-line-2, .HyperMD-list-line-6) .list-bullet:after {
+  height: 4px;
+  width: 4px;
+  background-color: Transparent;
+  border-color: var(--list-marker-color);
+  border-style: solid;
+  border-radius: 50%;
+  border-width: 1.5px;
+}
+
+.markdown-source-view.mod-cm6 :is(.HyperMD-list-line-3, .HyperMD-list-line-7) .list-bullet:after {
+  height: 5.5px;
+  width: 5.5px;
+  border-radius: 0%;
+  background-color: var(--list-marker-color);
+}
+
+.markdown-source-view.mod-cm6 :is(.HyperMD-list-line-4, .HyperMD-list-line-8) .list-bullet:after {
+  height: 4px;
+  width: 4px;
+  background-color: Transparent;
+  border-color: var(--list-marker-color);
+  border-style: solid;
+  border-radius: 0%;
+  border-width: 1.5px;
+}
+
+/* 图片居中及说明文字 */
+img {
+  display: block !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+.markdown-source-view.mod-cm6 .cm-content > * {
+  margin: auto auto !important;
+}
+
+.image-embed[alt]:after {
+  content: attr(alt);
+  display: block;
+  margin: 0.2rem 1rem 1rem 1rem;
+  font-size: 90%;
+  line-height: 1.4;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+/* 编辑模式：标题样式（保持层级感） */
+/* 一级标题居中 */
+.HyperMD-header-1, .inline-title[data-level='1'], .HyperMD-list-line .cm-header-1 {
+  font-variant: var(--h1-variant);
+  letter-spacing: -0.015em;
+  line-height: var(--h1-line-height);
+  font-size: var(--h1-size);
+  color: var(--h1-color);
+  text-align: center;
+  font-style: var(--h1-style);
+  font-family: var(--h1-font);
+}
+
+/* 二级及以下标题靠左 */
+.HyperMD-header-2, .inline-title[data-level='2'], .HyperMD-list-line .cm-header-2 {
+  font-size: 1.5rem !important;
+}
+
+.HyperMD-header-3, .inline-title[data-level='3'], .HyperMD-list-line .cm-header-3 {
+  font-size: 1.3rem !important;
+}
+
+.HyperMD-header-4, .inline-title[data-level='4'], .HyperMD-list-line .cm-header-4 {
+  font-size: 1.1rem !important;
+}
+
+.HyperMD-header-5, .inline-title[data-level='5'], .HyperMD-list-line .cm-header-5 {
+  font-size: 1rem !important;
+}
+
+.HyperMD-header-6, .inline-title[data-level='6'], .HyperMD-list-line .cm-header-6 {
+  font-size: 0.9rem !important;
+}
+
+/* 阅读模式：标题样式（保持层级感） */
+/* 一级标题居中 */
+h1, .markdown-rendered h1 {
+  font-size: 2rem !important;
+  text-align: center;
+  margin-block-start: 1.5rem !important;
+  margin-block-end: 1rem !important;
+}
+
+/* 二级及以下标题靠左 */
+h2, .markdown-rendered h2 {
+  font-size: 1.5rem !important;
+  margin-block-start: 1.2rem !important;
+  margin-block-end: 0.8rem !important;
+}
+
+h3, .markdown-rendered h3 {
+  font-size: 1.3rem !important;
+  margin-block-start: 1rem !important;
+  margin-block-end: 0.6rem !important;
+}
+
+h4, .markdown-rendered h4 {
+  font-size: 1.1rem !important;
+  margin-block-start: 0.8rem !important;
+  margin-block-end: 0.5rem !important;
+}
+
+h5, .markdown-rendered h5 {
+  font-size: 1rem !important;
+  margin-block-start: 0.7rem !important;
+  margin-block-end: 0.4rem !important;
+}
+
+h6, .markdown-rendered h6 {
+  font-size: 0.9rem !important;
+  margin-block-start: 0.6rem !important;
+  margin-block-end: 0.3rem !important;
+}
+
+/* 导航栏核心样式 */
+/* 清除所有默认缩进和边距 */
+.nav-folder-title, .nav-file-title,
+.n-tree-node, .n-tree-children {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+/* 导航项基础样式（统一左对齐，通过固定缩进保证同级别对齐） */
+/* 一级导航（最外层）：文件夹和文件统一缩进 */
+.nav-folder, .nav-file {
+  padding-left: 3px !important; /* 基础缩进，确保图标 + 文字对齐 */
+  transition: all 0.2s ease !important;
+}
+
+/* 二级导航（一级文件夹的子项）：统一缩进 */
+.nav-folder > .nav-folder-children .nav-folder,
+.nav-folder > .nav-folder-children .nav-file {
+  padding-left: 3px !important; 
+}
+
+/* 三级导航：统一缩进 */
+.nav-folder > .nav-folder-children .nav-folder > .nav-folder-children .nav-folder,
+.nav-folder > .nav-folder-children .nav-folder > .nav-folder-children .nav-file {
+  padding-left: 3px !important; 
+}
+
+/* 四级导航：统一缩进 */
+.nav-folder > .nav-folder-children .nav-folder > .nav-folder-children .nav-folder > .nav-folder-children .nav-folder,
+.nav-folder > .nav-folder-children .nav-folder > .nav-folder-children .nav-folder > .nav-folder-children .nav-file {
+  padding-left: 3px !important; 
+}
+
+/* 1. 所有文件夹加粗显示 */
+.nav-folder .nav-folder-title-content {
+  font-weight: var(--folder-weight) !important;
+  color: var(--folder-color) !important;
+}
+
+/* 2. 普通文件不加粗 */
+.nav-file .nav-file-title-content {
+  font-weight: var(--file-weight) !important;
+  color: var(--file-color) !important;
+}
+
+/* 3. 当前选中的文件（含文件夹）加粗为蓝色 */
+.nav-file-title.is-active .nav-file-title-content,
+.nav-folder-title.is-active .nav-folder-title-content {
+  font-weight: var(--current-file-weight) !important;
+  color: var(--current-file-color) !important;
+}
+
+/* 层级字号差异 */
+.nav-folder-title-content, .nav-file-title-content {
+  font-size: 100% !important;
+}
+
+.nav-folder > .nav-folder-children .nav-folder-title-content,
+.nav-folder > .nav-folder-children .nav-file-title-content {
+  font-size: 99% !important;
+}
+
+.nav-folder > .nav-folder-children .nav-folder > .nav-folder-children .nav-folder-title-content,
+.nav-folder > .nav-folder-children .nav-folder > .nav-folder-children .nav-file-title-content {
+  font-size: 99% !important;
+}
+
+.nav-folder > .nav-folder-children .nav-folder > .nav-folder-children .nav-folder > .nav-folder-children .nav-folder-title-content,
+.nav-folder > .nav-folder-children .nav-folder > .nav-folder-children .nav-folder > .nav-folder-children .nav-file-title-content {
+  font-size: 99% !important;
+}
+
+/* 当前项背景框样式 */
+.nav-file-title.is-active,
+.nav-folder-title.is-active {
+  background-color: var(--nav-active-bg) !important;
+  border-radius: 3px !important;
+  padding-left: 0px !important;
+}
+
+/* 导航栏图标样式 */
+.nav-folder .nav-collapse-icon {
+  color: var(--folder-color) !important;
+  opacity: 0.9 !important;
+}
+
+.nav-file .nav-collapse-icon {
+  color: var(--file-color) !important;
+  opacity: 0.8 !important;
+}
+
+/* 当前项图标同步为蓝色 */
+.nav-file-title.is-active .nav-collapse-icon,
+.nav-folder-title.is-active .nav-collapse-icon {
+  color: var(--current-file-color) !important;
+  opacity: 1 !important;
+}
+
+/* 导航栏悬停效果 */
+.nav-folder-title:hover, .nav-file-title:hover {
+  background-color: rgba(0, 0, 0, 0.05) !important;
+  border-radius: 3px !important;
+}
+.theme-dark .nav-folder-title:hover, 
+.theme-dark .nav-file-title:hover {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+}

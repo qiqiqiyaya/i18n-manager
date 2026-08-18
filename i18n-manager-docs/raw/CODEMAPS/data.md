@@ -173,6 +173,6 @@ POST with `{ languages: string[] }`:
 
 ## Related Areas
 
-- [Architecture Codemap](./architecture.md)
-- [Backend Codemap](./backend.md)
-- [Dependencies Codemap](./dependencies.md)
+- [Architecture Codemap](architecture.md)
+- [Backend Codemap](backend.md)
+- [Dependencies Codemap](dependencies.md)

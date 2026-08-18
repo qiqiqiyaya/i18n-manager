@@ -129,6 +129,6 @@ Zod schemas:
 
 ## Related Areas
 
-- [Architecture Codemap](./architecture.md)
-- [Data Codemap](./data.md)
-- [Frontend Codemap](./frontend.md)
+- [Architecture Codemap](architecture.md)
+- [Data Codemap](data.md)
+- [Frontend Codemap](frontend.md)

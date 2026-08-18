@@ -122,7 +122,7 @@ User edits Schema → compute added/removed/renamed keys
 
 ## Related Areas
 
-- [Frontend Codemap](./frontend.md)
-- [Backend Codemap](./backend.md)
-- [Data Codemap](./data.md)
-- [Dependencies Codemap](./dependencies.md)
+- [Frontend Codemap](frontend.md)
+- [Backend Codemap](backend.md)
+- [Data Codemap](data.md)
+- [Dependencies Codemap](dependencies.md)
