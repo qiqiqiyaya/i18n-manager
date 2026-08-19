@@ -14,6 +14,7 @@ import { useSocket } from '@/hooks/useSocket';
 import { useSearch, type SearchResult } from '@/hooks/useSearch';
 import SchemaEditor, { type SchemaEditorHandle } from '@/components/project/SchemaEditor';
 import LocaleEditor, { type LocaleEditorHandle } from '@/components/project/LocaleEditor';
+import EditorSplitPane from '@/components/project/EditorSplitPane';
 import LanguageTabs from '@/components/project/LanguageTabs';
 import OnlineBadge from '@/components/collaboration/OnlineBadge';
 import ImportPreviewDialog from '@/components/project/ImportPreviewDialog';
@@ -401,18 +402,26 @@ export default function ProjectEditorPage({ params }: Props) {
           {overwrittenMessage}
         </div>
       )}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        <div style={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column', borderRight: '1px solid #f0f0f0' }}>
-          <div style={{ height: 40, display: 'flex', alignItems: 'center', padding: '0 16px', borderBottom: '1px solid #f0f0f0', fontWeight: 600, fontSize: 14, flexShrink: 0, boxSizing: 'border-box', overflow: 'hidden' }}>主表 Schema</div>
-          <div style={{ flex: 1, overflow: 'auto', position: 'relative' }}><SchemaEditor ref={schemaEditorRef} sendSchemaUpdated={sendSchemaUpdated} sendSchemaSave={sendSchemaSave} onScrollChange={handleSchemaScroll} onReferenceToken={(p) => handleReferenceToken(p, 'schema')} /></div>
-        </div>
-        <div style={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ height: 40, display: 'flex', alignItems: 'center', padding: '0 16px', borderBottom: '1px solid #f0f0f0', flexShrink: 0, boxSizing: 'border-box', overflow: 'hidden' }}>
-            <LanguageTabs projectId={id} availableLocales={availableLocales} onRefreshLocales={loadProject} />
-          </div>
-          <LocaleStatusBar />
-          <div style={{ flex: 1, overflow: 'auto', position: 'relative' }}><LocaleEditor ref={localeEditorRef} sendLocaleSave={sendLocaleSave} sendLocaleUpdated={sendLocaleUpdated} onScrollChange={handleLocaleScroll} onReferenceToken={(p) => handleReferenceToken(p, 'locale')} /></div>
-        </div>
+      {/* 左右分栏（可拖拽 + localStorage 持久化比例，见 EditorSplitPane）：
+          left/right children 引用由本组件稳定持有，拖拽重渲染时编辑器子树免重建 */}
+      <div style={{ flex: 1, overflow: 'hidden' }}>
+        <EditorSplitPane
+          left={
+            <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ height: 40, display: 'flex', alignItems: 'center', padding: '0 16px', borderBottom: '1px solid #f0f0f0', fontWeight: 600, fontSize: 14, flexShrink: 0, boxSizing: 'border-box', overflow: 'hidden' }}>主表 Schema</div>
+              <div style={{ flex: 1, overflow: 'auto', position: 'relative' }}><SchemaEditor ref={schemaEditorRef} sendSchemaUpdated={sendSchemaUpdated} sendSchemaSave={sendSchemaSave} onScrollChange={handleSchemaScroll} onReferenceToken={(p) => handleReferenceToken(p, 'schema')} /></div>
+            </div>
+          }
+          right={
+            <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ height: 40, display: 'flex', alignItems: 'center', padding: '0 16px', borderBottom: '1px solid #f0f0f0', flexShrink: 0, boxSizing: 'border-box', overflow: 'hidden' }}>
+                <LanguageTabs projectId={id} availableLocales={availableLocales} onRefreshLocales={loadProject} />
+              </div>
+              <LocaleStatusBar />
+              <div style={{ flex: 1, overflow: 'auto', position: 'relative' }}><LocaleEditor ref={localeEditorRef} sendLocaleSave={sendLocaleSave} sendLocaleUpdated={sendLocaleUpdated} onScrollChange={handleLocaleScroll} onReferenceToken={(p) => handleReferenceToken(p, 'locale')} /></div>
+            </div>
+          }
+        />
       </div>
       <ImportPreviewDialog projectId={id} open={importOpen}
         onClose={() => setImportOpen(false)} onImported={loadProject} />

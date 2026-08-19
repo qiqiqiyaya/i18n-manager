@@ -15,6 +15,14 @@ aliases:
 
 > 追加式时间线。格式：`## [YYYY-MM-DD] 类型 | 标题`（可用 `grep "^## \[" log.md` 解析）。
 
+## [2026-08-20] update | 编辑器分栏可拖拽 + localStorage 持久化
+
+- 新增 `EditorSplitPane`（antd `Splitter` 受控模式）：左右分栏可拖拽调整宽度，默认 Schema 40% / 多语言 60%，各栏 min 25% / max 75%，双击分割条重置默认。
+- 持久化：分栏比例存 `localStorage`（键 `i18n-manager:editor-split`），全局一份、跨项目共享；`onResizeEnd` 才写入（拖拽中不写）。
+- 选型考量：存比例而非像素（窗口缩放不失真，antd 内部按百分比 flex-basis 布局）；`left`/`right` children 引用稳定，拖拽重渲染时编辑器子树（Monaco）免重建。
+- 文档：[[features/编辑器|编辑器]] 布局段更新（含 `分割条` / `分栏比例` / `布局偏好(localStorage)` 术语）。
+- 首个 localStorage 使用点（父仓库 CLAUDE.md 暂未提炼约定，YAGNI）。
+
 ## [2026-08-20] update | 查找框改为纯悬浮右上角（addExtraSpaceOnTop:false）
 
 - 根因定位："Ctrl+F 查找框向上撑开高度" = Monaco 默认 `find.addExtraSpaceOnTop: true` 在第 0 行前插入 ViewZone（~33px 空白区、内容下移），非工作区 CSS 所致；查找框本身一直是 overlay widget（position:absolute + TOP_RIGHT_CORNER）。
