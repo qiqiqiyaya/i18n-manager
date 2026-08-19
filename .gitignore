@@ -13,3 +13,4 @@ tsconfig.tsbuildinfo
 .playwright-mcp
 coverage
 .claudian
+.obsidian
