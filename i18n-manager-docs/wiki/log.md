@@ -15,6 +15,13 @@ aliases:
 
 > 追加式时间线。格式：`## [YYYY-MM-DD] 类型 | 标题`（可用 `grep "^## \[" log.md` 解析）。
 
+## [2026-08-20] update | 查找框改为纯悬浮右上角（addExtraSpaceOnTop:false）
+
+- 根因定位："Ctrl+F 查找框向上撑开高度" = Monaco 默认 `find.addExtraSpaceOnTop: true` 在第 0 行前插入 ViewZone（~33px 空白区、内容下移），非工作区 CSS 所致；查找框本身一直是 overlay widget（position:absolute + TOP_RIGHT_CORNER）。
+- 决策：`MonacoEditor.DEFAULT_OPTIONS` 与 `ImportPreviewDialog` DiffEditor 设 `find.addExtraSpaceOnTop: false` → 查找框纯悬浮右上角、内容不再下移。属有意偏离上游默认，monaco 升级后保留。
+- 附带：[[bugs/FindWidget滚动同步|滚动同步]] bug 的同源根因（ViewZone ±33px）随之根除；`prevScrollHeight` 守卫保留，仍兜底内容编辑/初始加载。
+- 文档：[[features/编辑器|编辑器]] 记录决策；[[bugs/FindWidget悬停闪烁|悬停闪烁]]/[[bugs/FindWidget滚动同步|滚动同步]] 补 2026-08-20 说明；父仓库 CLAUDE.md 待办澄清升级边界。
+
 ## [2026-08-19] ingest | 16 份源文档批量入库（首次）
 
 - 新建 27 个 wiki 页面 + index.md + log.md，覆盖全部 16 份 raw 文档（~2836 行）。

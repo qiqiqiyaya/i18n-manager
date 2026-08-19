@@ -132,6 +132,8 @@ export default function ImportPreviewDialog({
                         scrollBeyondLastLine: false,
                         fontSize: 13,
                         renderSideBySide: true,
+                        // 与 MonacoEditor.DEFAULT_OPTIONS 保持一致：查找框纯悬浮右上角，不插顶部空白
+                        find: { addExtraSpaceOnTop: false },
                       }}
                     />
                   </div>

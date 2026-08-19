@@ -9,7 +9,7 @@ tags:
 source:
   - "[[raw/bug/find-widget-scroll-sync.md]]"
 created: 2026-08-19
-updated: 2026-08-19
+updated: 2026-08-20
 aliases:
   - 滚动同步 bug
   - scroll sync
@@ -61,6 +61,13 @@ Monaco 的 `onDidScrollChange` 在**任何滚动位置变化**时都触发，包
 | 查找框出现/消失 | 变化（±33） | 跳过 ✅ |
 | 编辑 JSON 内容（换行/删行） | 变化 | 跳过（下次用户滚动正常）✅ |
 | 初始加载 | 0 → 实际 | 跳过（ratio=0 归零无害）✅ |
+
+## 2026-08-20 更新：同源根因移除
+
+> 上述 +33/-33px 的源头是 Monaco 默认 `find.addExtraSpaceOnTop: true` 在第 0 行前插入的 **ViewZone**。同日将其设为 `false`（`MonacoEditor.DEFAULT_OPTIONS` + `ImportPreviewDialog` DiffEditor）后：
+
+- 查找框开/关不再改变 `scrollHeight` → 此 bug 的触发路径（上表"查找框出现/消失"行）**已根除**。
+- `prevScrollHeight` 守卫**保留**：仍兜底「内容编辑」「初始加载」两类 `scrollHeight` 变化（见 [[features/编辑器|编辑器]] 的 `addExtraSpaceOnTop` 决策）。
 
 ## 关联
 

@@ -7,6 +7,8 @@ This file provides guidance to working with code in this repository.
 多语言管理平台（i18n Manager）—— 轻量级、协作式多语言翻译管理工具。全栈 Next.js 16（canary）+ Express 5 + Socket.IO，无用户系统、数据全局共享。核心功能已实现并可运行（`server.ts` 启动，`data/projects/` 自动创建）。完整需求技术文档见下方「知识库：i18n-manager-docs」。
 
 > **待办**：`monaco-editor@0.56.1` 发布后升级并移除 FindWidget 悬停闪烁工作区（`globals.css` 的 `.context-view` 规则等），详见 `i18n-manager-docs/wiki/bugs/FindWidget悬停闪烁.md`。
+>
+> ⚠️ 但 `find.addExtraSpaceOnTop: false`（`MonacoEditor.DEFAULT_OPTIONS` 与 `ImportPreviewDialog` DiffEditor）是**有意的产品决策**，升级后**必须保留**：它让查找框纯悬浮右上角、不插入顶部 ViewZone（~33px 空白区、内容下移）。0.56.1 的 #5442 修复只解决 containing block 定位（悬停闪烁），与此无关。
 
 ## 知识库：i18n-manager-docs
 

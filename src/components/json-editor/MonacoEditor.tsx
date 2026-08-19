@@ -54,6 +54,10 @@ const DEFAULT_OPTIONS: editor.IStandaloneEditorConstructionOptions = {
   folding: true,
   renderWhitespace: 'selection',
   bracketPairColorization: { enabled: true },
+  // 有意偏离 Monaco 默认（true）：不插入顶部 ViewZone。默认 true 会在第 0 行前
+  // 插一块 ~33px 空白区、把内容整体下移，观感是"查找框撑开了一段高度"；
+  // false 时查找框纯悬浮在右上角（overlay widget），不占布局。见 FindWidget滚动同步 bug 的同源根因。
+  find: { addExtraSpaceOnTop: false },
 };
 
 function MonacoEditorComponent(
@@ -98,8 +102,11 @@ function MonacoEditorComponent(
           scrollRafId = null;
           const scrollTop = editorInstance.getScrollTop();
           const scrollHeight = editorInstance.getScrollHeight();
-          // 当 scrollHeight 变化时（如 find widget 打开/关闭导致布局变化），
-          // 跳过滚动同步——这是布局变化而非用户滚动
+          // 当 scrollHeight 变化时（内容编辑 / 初始加载 / 布局变化），跳过滚动同步——
+          // 这是布局变化而非用户滚动，同步会让对侧编辑器跳位。
+          // 注：Find Widget 曾因 find.addExtraSpaceOnTop 的 ViewZone 增删触发此分支
+          // （±33px，见 FindWidget滚动同步 bug）；现已设 addExtraSpaceOnTop:false，
+          // 该路径不再发生，守卫仍兜底内容编辑与初始加载。
           if (scrollHeight !== prevScrollHeight) {
             prevScrollHeight = scrollHeight;
             return;

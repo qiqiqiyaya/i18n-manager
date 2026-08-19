@@ -9,7 +9,7 @@ tags:
 source:
   - "[[raw/bug/find-widget-hover-flicker.md]]"
 created: 2026-08-19
-updated: 2026-08-19
+updated: 2026-08-20
 aliases:
   - 悬停闪烁
   - hover flicker
@@ -51,6 +51,11 @@ aliases:
 - 修复前：Ctrl+F → hover → `.context-view` 浮层出现/消失循环。
 - 修复后：hover 稳定、按钮可点击；回归（自动保存、双 tab 协作、`tsc && lint && test`）。
 - **遗留**：工作区方案依赖 CSS 定位对齐，与上游 JS 层修复机制不完全相同；极窄窗口/特殊缩放边界仍可能复现，需依赖 0.56.1 彻底解决。改动仅 `position`，不影响 undo/折叠/协作。
+
+## 2026-08-20 补充：与 addExtraSpaceOnTop 决策的边界
+
+- 本页工作区（`globals.css` 的 `.relative > .context-view` + 编辑器 `className="relative"`）针对 **hover 浮层闪烁**，与查找框顶部空白**无关**，升级 0.56.1 后照常移除。
+- `find.addExtraSpaceOnTop: false`（纯悬浮右上角、不插顶部 ViewZone）是独立的有意决策，见 [[features/编辑器|编辑器]]；**不随本工作区移除**。
 
 ## 关联
 
